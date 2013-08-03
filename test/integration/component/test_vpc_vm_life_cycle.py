@@ -27,6 +27,8 @@ from marvin.integration.lib.base import *
 from marvin.integration.lib.common import *
 from marvin.remoteSSHClient import remoteSSHClient
 
+import time
+
 class Services:
     """Test VM life cycle in VPC network services
     """
@@ -426,7 +428,8 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
             self.debug("Checking if we can SSH into VM_1 through %s?" %
                     (self.public_ip_1.ipaddress.ipaddress))
             ssh_1 = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
 
             self.debug("Verifying if we can ping to outside world from VM?")
@@ -452,7 +455,8 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
                 (self.public_ip_2.ipaddress.ipaddress))
         try:
             ssh_2 = self.vm_1.get_ssh_client(
-                            ipaddress=self.public_ip_2.ipaddress.ipaddress)
+                            ipaddress=self.public_ip_2.ipaddress.ipaddress,
+                            reconnect=True)
             self.debug("SSH into VM is successfully")
 
             self.debug("Verifying if we can ping to outside world from VM?")
@@ -563,6 +567,8 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
             self.vm_2.start(self.apiclient)
         except Exception as e:
             self.fail("Failed to start the virtual instances, %s" % e)
+        # Wait until vms are up
+        time.sleep(120)
         self.debug("Validating if the network rules work properly or not?")
         self.validate_network_rules()
         return
@@ -590,6 +596,8 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
         except Exception as e:
             self.fail("Failed to reboot the virtual instances, %s" % e)
 
+        # Wait until vms are up
+        time.sleep(120)
         self.debug("Validating if the network rules work properly or not?")
         self.validate_network_rules()
         return
@@ -666,6 +674,9 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
         except Exception as e:
             self.fail("Failed to start the instances, %s" % e)
 
+        # Wait until vms are up
+        time.sleep(120)
+
         self.debug("Validating if the network rules work properly or not?")
         self.validate_network_rules()
         return
@@ -736,27 +747,16 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
 
         try:
             ssh = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
         except Exception as e:
             self.fail("Failed to SSH into instance")
 
-        # Find router associated with user account
-        routers = Router.list(
-                                    self.apiclient,
-                                    zoneid=self.zone.id,
-                                    listall=True
-                                    )
-        self.assertEqual(
-                            isinstance(routers, list),
-                            True,
-                            "Check list response returns a valid list"
-                        )
-        router = routers[0]
         self.debug("check the userdata with that of present in router")
         try:
             cmds = [
-               "wget http://%s/latest/user-data" % router.guestipaddress,
+               "wget http://%s/latest/user-data" % self.network_1.gateway,
                "cat user-data",
                ]
             for c in cmds:
@@ -790,28 +790,17 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
 
         try:
             ssh = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
         except Exception as e:
             self.fail("Failed to SSH into instance")
 
-        # Find router associated with user account
-        routers = Router.list(
-                                    self.apiclient,
-                                    zoneid=self.zone.id,
-                                    listall=True
-                                    )
-        self.assertEqual(
-                            isinstance(routers, list),
-                            True,
-                            "Check list response returns a valid list"
-                        )
-        router = routers[0]
         self.debug("check the metadata with that of present in router")
         try:
             cmds = [
-               "wget http://%s/latest/meta-data" % router.guestipaddress,
-               "cat user-data",
+               "wget http://%s/latest/vm-id" % self.network_1.gateway,
+               "cat vm-id",
                ]
             for c in cmds:
                 result = ssh.execute(c)
@@ -859,28 +848,19 @@ class TestVMLifeCycleVPC(cloudstackTestCase):
                         )
 
         # Check if the network rules still exists after Vm stop
-        self.debug("Checking if NAT rules ")
-        nat_rules = NATRule.list(
-                                 self.apiclient,
-                                 id=self.nat_rule.id,
-                                 listall=True
-                                 )
-        self.assertEqual(
-                         nat_rules,
-                         None,
-                         "List NAT rules should not return anything"
-                         )
+        self.debug("Checking if NAT rules existed")
+        with self.assertRaises(Exception):
+            nat_rules = NATRule.list(
+                                     self.apiclient,
+                                     id=self.nat_rule.id,
+                                     listall=True
+                                     )
 
-        lb_rules = LoadBalancerRule.list(
+            lb_rules = LoadBalancerRule.list(
                                          self.apiclient,
                                          id=self.lb_rule.id,
                                          listall=True
                                          )
-        self.assertEqual(
-                         lb_rules,
-                         None,
-                         "List LB rules should not return anything"
-                         )
         return
 
 class TestVMLifeCycleSharedNwVPC(cloudstackTestCase):
@@ -1151,8 +1131,11 @@ class TestVMLifeCycleSharedNwVPC(cloudstackTestCase):
         """Validating if the network rules (PF/LB) works properly or not?"""
 
         try:
+            self.debug("Checking if we can SSH into VM_1 through %s?" %
+                    (self.public_ip_1.ipaddress.ipaddress))
             ssh_1 = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
 
             self.debug("Verifying if we can ping to outside world from VM?")
@@ -1515,27 +1498,16 @@ class TestVMLifeCycleSharedNwVPC(cloudstackTestCase):
 
         try:
             ssh = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
         except Exception as e:
             self.fail("Failed to SSH into instance")
 
-        # Find router associated with user account
-        routers = Router.list(
-                                    self.apiclient,
-                                    zoneid=self.zone.id,
-                                    listall=True
-                                    )
-        self.assertEqual(
-                            isinstance(routers, list),
-                            True,
-                            "Check list response returns a valid list"
-                        )
-        router = routers[0]
         self.debug("check the userdata with that of present in router")
         try:
             cmds = [
-               "wget http://%s/latest/user-data" % router.guestipaddress,
+               "wget http://%s/latest/user-data" % self.network_1.gateway,
                "cat user-data",
                ]
             for c in cmds:
@@ -1569,28 +1541,17 @@ class TestVMLifeCycleSharedNwVPC(cloudstackTestCase):
 
         try:
             ssh = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
         except Exception as e:
             self.fail("Failed to SSH into instance")
 
-        # Find router associated with user account
-        routers = Router.list(
-                                    self.apiclient,
-                                    zoneid=self.zone.id,
-                                    listall=True
-                                    )
-        self.assertEqual(
-                            isinstance(routers, list),
-                            True,
-                            "Check list response returns a valid list"
-                        )
-        router = routers[0]
         self.debug("check the metadata with that of present in router")
         try:
             cmds = [
-               "wget http://%s/latest/meta-data" % router.guestipaddress,
-               "cat user-data",
+               "wget http://%s/latest/vm-id" % self.network_1.gateway,
+               "cat vm-id",
                ]
             for c in cmds:
                 result = ssh.execute(c)
@@ -1656,29 +1617,20 @@ class TestVMLifeCycleSharedNwVPC(cloudstackTestCase):
                          ["expunge.interval", "expunge.delay"]
                         )
 
-        # Check if the network rules still exists after Vm stop
-        self.debug("Checking if NAT rules ")
-        nat_rules = NATRule.list(
-                                 self.apiclient,
-                                 id=self.nat_rule.id,
-                                 listall=True
-                                 )
-        self.assertEqual(
-                         nat_rules,
-                         None,
-                         "List NAT rules should not return anything"
-                         )
+        # Check if the network rules still exists after Vm expunged 
+        self.debug("Checking if NAT rules existed ")
+        with self.assertRaises(Exception):
+            nat_rules = NATRule.list(
+                                     self.apiclient,
+                                     id=self.nat_rule.id,
+                                     listall=True
+                                     )
 
-        lb_rules = LoadBalancerRule.list(
+            lb_rules = LoadBalancerRule.list(
                                          self.apiclient,
                                          id=self.lb_rule.id,
                                          listall=True
                                          )
-        self.assertEqual(
-                         lb_rules,
-                         None,
-                         "List LB rules should not return anything"
-                         )
         return
 
 
@@ -1860,8 +1812,11 @@ class TestVMLifeCycleBothIsolated(cloudstackTestCase):
         """Validating if the network rules (PF/LB) works properly or not?"""
 
         try:
+            self.debug("Checking if we can SSH into VM_1 through %s?" %
+                    (self.public_ip_1.ipaddress.ipaddress))
             ssh_1 = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
 
             self.debug("Verifying if we can ping to outside world from VM?")
@@ -2285,8 +2240,11 @@ class TestVMLifeCycleStoppedVPCVR(cloudstackTestCase):
     def validate_network_rules(self):
         """Validates if the network rules work properly or not?"""
         try:
+            self.debug("Checking if we can SSH into VM_1 through %s?" %
+                    (self.public_ip_1.ipaddress.ipaddress))
             ssh_1 = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
 
             self.debug("Verifying if we can ping to outside world from VM?")
@@ -2311,7 +2269,8 @@ class TestVMLifeCycleStoppedVPCVR(cloudstackTestCase):
         self.debug("Checking if we can SSH into VM_1?")
         try:
             ssh_2 = self.vm_1.get_ssh_client(
-                            ipaddress=self.public_ip_2.ipaddress.ipaddress)
+                            ipaddress=self.public_ip_2.ipaddress.ipaddress,
+                            reconnect=True)
             self.debug("SSH into VM is successfully")
 
             self.debug("Verifying if we can ping to outside world from VM?")
@@ -2595,27 +2554,16 @@ class TestVMLifeCycleStoppedVPCVR(cloudstackTestCase):
 
         try:
             ssh = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
         except Exception as e:
             self.fail("Failed to SSH into instance")
 
-        # Find router associated with user account
-        routers = Router.list(
-                                    self.apiclient,
-                                    zoneid=self.zone.id,
-                                    listall=True
-                                    )
-        self.assertEqual(
-                            isinstance(routers, list),
-                            True,
-                            "Check list response returns a valid list"
-                        )
-        router = routers[0]
         self.debug("check the userdata with that of present in router")
         try:
             cmds = [
-               "wget http://%s/latest/user-data" % router.guestipaddress,
+               "wget http://%s/latest/user-data" % self.network_1.gateway,
                "cat user-data",
                ]
             for c in cmds:
@@ -2649,28 +2597,17 @@ class TestVMLifeCycleStoppedVPCVR(cloudstackTestCase):
 
         try:
             ssh = self.vm_1.get_ssh_client(
-                                ipaddress=self.public_ip_1.ipaddress.ipaddress)
+                                ipaddress=self.public_ip_1.ipaddress.ipaddress,
+                                reconnect=True)
             self.debug("SSH into VM is successfully")
         except Exception as e:
             self.fail("Failed to SSH into instance")
 
-        # Find router associated with user account
-        routers = Router.list(
-                                    self.apiclient,
-                                    zoneid=self.zone.id,
-                                    listall=True
-                                    )
-        self.assertEqual(
-                            isinstance(routers, list),
-                            True,
-                            "Check list response returns a valid list"
-                        )
-        router = routers[0]
         self.debug("check the metadata with that of present in router")
         try:
             cmds = [
-               "wget http://%s/latest/meta-data" % router.guestipaddress,
-               "cat user-data",
+               "wget http://%s/latest/vm-id" % self.network_1.gateway,
+               "cat vm-id",
                ]
             for c in cmds:
                 result = ssh.execute(c)
@@ -2717,27 +2654,18 @@ class TestVMLifeCycleStoppedVPCVR(cloudstackTestCase):
                          ["expunge.interval", "expunge.delay"]
                         )
 
-        # Check if the network rules still exists after Vm stop
-        self.debug("Checking if NAT rules ")
-        nat_rules = NATRule.list(
-                                 self.apiclient,
-                                 id=self.nat_rule.id,
-                                 listall=True
-                                 )
-        self.assertEqual(
-                         nat_rules,
-                         None,
-                         "List NAT rules should not return anything"
-                         )
+        # Check if the network rules still exists after Vm expunged 
+        self.debug("Checking if NAT rules existed ")
+        with self.assertRaises(Exception):
+            nat_rules = NATRule.list(
+                                     self.apiclient,
+                                     id=self.nat_rule.id,
+                                     listall=True
+                                     )
 
-        lb_rules = LoadBalancerRule.list(
+            lb_rules = LoadBalancerRule.list(
                                          self.apiclient,
                                          id=self.lb_rule.id,
                                          listall=True
                                          )
-        self.assertEqual(
-                         lb_rules,
-                         None,
-                         "List LB rules should not return anything"
-                         )
         return

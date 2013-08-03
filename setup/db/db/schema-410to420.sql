@@ -27,6 +27,9 @@ ALTER TABLE `cloud`.`hypervisor_capabilities` ADD CONSTRAINT `uc_hypervisor` UNI
 
 ALTER TABLE `cloud`.`hypervisor_capabilities` ADD COLUMN `max_hosts_per_cluster` int unsigned DEFAULT NULL COMMENT 'Max. hosts in cluster supported by hypervisor';
 ALTER TABLE `cloud`.`hypervisor_capabilities` ADD COLUMN `storage_motion_supported` int(1) unsigned DEFAULT 0 COMMENT 'Is storage motion supported';
+ALTER TABLE volumes ADD COLUMN vm_snapshot_chain_size bigint(20) unsigned;
+ALTER TABLE volumes ADD COLUMN iso_id bigint(20)  unsigned;
+
 UPDATE `cloud`.`hypervisor_capabilities` SET `max_hosts_per_cluster`=32 WHERE `hypervisor_type`='VMware';
 INSERT IGNORE INTO `cloud`.`hypervisor_capabilities`(uuid, hypervisor_type, hypervisor_version, max_guests_limit, security_group_enabled, max_data_volumes_limit, storage_motion_supported) VALUES (UUID(), 'XenServer', '6.1.0', 50, 1, 13, 1);
 INSERT IGNORE INTO `cloud`.`hypervisor_capabilities`(uuid, hypervisor_type, hypervisor_version, max_guests_limit, security_group_enabled, max_data_volumes_limit, storage_motion_supported) VALUES (UUID(), 'XenServer', '6.2.0', 50, 1, 13, 1);
@@ -280,6 +283,12 @@ INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALU
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (166, UUID(), 6, 'Windows 8 (64-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (167, UUID(), 6, 'Windows Server 2012 (64-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (168, UUID(), 6, 'Windows Server 8 (64-bit)');
+
+# clean up row added in 3.0.6.
+UPDATE `cloud`.`guest_os_hypervisor` set guest_os_id = 166 where guest_os_id = 206;
+UPDATE `cloud`.`vm_template` set guest_os_id = 166 where guest_os_id = 206;
+UPDATE `cloud`.`vm_instance` set guest_os_id = 166 where guest_os_id = 206;
+DELETE IGNORE FROM `cloud`.`guest_os` where id=206;
 
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (169, UUID(), 10, 'Ubuntu 11.04 (32-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (170, UUID(), 10, 'Ubuntu 11.04 (64-bit)');
@@ -1788,7 +1797,7 @@ CREATE VIEW `cloud`.`volume_view` AS
             left join
         `cloud`.`cluster` ON storage_pool.cluster_id = cluster.id
             left join
-        `cloud`.`vm_template` ON volumes.template_id = vm_template.id
+        `cloud`.`vm_template` ON volumes.template_id = vm_template.id OR volumes.iso_id = vm_template.id
             left join
         `cloud`.`resource_tags` ON resource_tags.resource_id = volumes.id
             and resource_tags.resource_type = 'Volume'
@@ -2219,4 +2228,5 @@ CREATE TABLE `cloud_usage`.`usage_vmsnapshot` (
   INDEX `i_usage_vmsnapshot` (`account_id`,`id`,`vm_id`,`created`)
 ) ENGINE=InnoDB CHARSET=utf8;
 
-ALTER TABLE volumes ADD COLUMN vm_snapshot_chain_size bigint(20) unsigned;
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'healthcheck.update.interval', '600', 'Time Interval to fetch the LB health check states (in sec)');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Snapshots', 'DEFAULT', 'SnapshotManager', 'KVM.snapshot.enabled', 'false', 'whether snapshot is enabled for KVM hosts');

@@ -571,6 +571,20 @@ class VirtualMachine:
         except Exception as e:
             raise Exception("assignVirtualMachine failed - %s" %e)
 
+    def update_affinity_group(self, apiclient, affinitygroupids=None,
+                              affinitygroupnames=None):
+        """Update affinity group of a VM"""
+        cmd = updateVMAffinityGroup.updateVMAffinityGroupCmd()
+        cmd.id = self.id
+
+        if affinitygroupids:
+            cmd.affinitygroupids = affinitygroupids
+
+        if affinitygroupnames:
+            cmd.affinitygroupnames = affinitygroupnames
+
+        return apiclient.updateVMAffinityGroup(cmd)
+
 
 class Volume:
     """Manage Volume Life cycle
@@ -1074,7 +1088,7 @@ class PublicIPAddress:
 
     @classmethod
     def create(cls, apiclient, accountid=None, zoneid=None, domainid=None, services=None,
-               networkid=None, projectid=None, vpcid=None, isportable=None):
+               networkid=None, projectid=None, vpcid=None, isportable=False):
         """Associate Public IP address"""
         cmd = associateIpAddress.associateIpAddressCmd()
 

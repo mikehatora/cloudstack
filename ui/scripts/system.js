@@ -1082,22 +1082,23 @@
                         actions: {
                             edit: {
                                 label: 'label.edit',
-                                action: function(args) {
-                                    var vlan;
-                                    if (args.data.endVlan == null || args.data.endVlan.length == 0)
-                                        vlan = args.data.startVlan;
-                                    else
-                                        vlan = args.data.startVlan + "-" + args.data.endVlan;
-
-                                    var array1 = [];
-                                    if (vlan != null && vlan.length > 0)
-                                        array1.push("&vlan=" + todb(vlan));
-                                    if (args.data.tags != null && args.data.tags.length > 0)
-                                        array1.push("&tags=" + todb(args.data.tags));
-
+                                action: function(args) {                                   
+                                    var data = {
+                                    	id: selectedPhysicalNetworkObj.id,
+                                    };                                 
+                                    if (args.data.vlan != null && args.data.vlan.length > 0) {
+                                    	$.extend(data, {
+                                    		vlan: args.data.vlan
+                                    	});
+                                    }                                        
+                                    if (args.data.tags != null && args.data.tags.length > 0) {
+                                    	$.extend(data, {
+                                    		tags: args.data.tags
+                                    	});
+                                    }    
                                     $.ajax({
-                                        url: createURL("updatePhysicalNetwork&id=" + selectedPhysicalNetworkObj.id + array1.join("")),
-                                        dataType: "json",
+                                        url: createURL('updatePhysicalNetwork'),
+                                        data: data,
                                         success: function(json) {
                                             var jobId = json.updatephysicalnetworkresponse.jobid;
 
@@ -1116,137 +1117,7 @@
                                 notification: {
                                     poll: pollAsyncJobResult
                                 }
-                            },
-
-                            addVlanRange: {
-                                label: 'Add VLAN Range',
-                                title: 'Add VLAN Range',
-
-                                messages: {
-                                    confirm: function(args) {
-                                        return 'Are you sure you want to add another VLAN Range to this guest network?';
-                                    },
-                                    notification: function(args) {
-                                        return 'VLAN Range added';
-                                    }
-                                },
-
-                                createForm: {
-                                    title: 'Add VLAN Range',
-                                    fields: {
-                                        startvlan: {
-                                            label: 'Vlan Start',
-                                            validation: {
-                                                required: true
-                                            }
-                                        },
-                                        endvlan: {
-                                            label: 'Vlan End',
-                                            validation: {
-                                                required: true
-                                            }
-                                        }
-                                    }
-
-                                },
-
-                                action: function(args) {
-
-                                    var array1 = [];
-                                    if (args.data.startvlan != "" && args.data.endvlan != "") {
-                                        array1.push("&vlan=" + todb(args.data.startvlan) + "-" + todb(args.data.endvlan));
-
-                                    }
-                                    $.ajax({
-                                        url: createURL("updatePhysicalNetwork&id=" + selectedPhysicalNetworkObj.id + array1.join("")),
-                                        dataType: "json",
-                                        success: function(json) {
-                                            var jobId = json.updatephysicalnetworkresponse.jobid;
-                                            args.response.success({
-                                                _custom: {
-                                                    jobId: jobId
-                                                }
-                                            });
-                                        },
-
-                                        error: function(json) {
-                                            args.response.error(parseXMLHttpResponse(json));
-
-                                        }
-
-                                    });
-
-
-                                },
-                                notification: {
-                                    poll: pollAsyncJobResult
-                                }
-
-
-                            },
-
-                            removeVlanRange: {
-                                label: 'Remove VLAN Range',
-                                messages: {
-                                    confirm: function(args) {
-                                        return 'Are you sure you want to remove an existing VLAN Range from this guest network?';
-                                    },
-                                    notification: function(args) {
-                                        return 'VLAN Range removed';
-                                    }
-                                },
-
-                                createForm: {
-                                    title: 'Remove VLAN Range',
-                                    fields: {
-                                        startvlan: {
-                                            label: 'Vlan Start',
-                                            validation: {
-                                                required: true
-                                            }
-                                        },
-                                        endvlan: {
-                                            label: 'Vlan End',
-                                            validation: {
-                                                required: true
-                                            }
-                                        }
-                                    }
-
-                                },
-
-                                action: function(args) {
-
-                                    var array1 = [];
-                                    if (args.data.startvlan != "" && args.data.endvlan != "") {
-                                        array1.push("&removevlan=" + args.data.startvlan + "-" + args.data.endvlan);
-                                    }
-                                    $.ajax({
-                                        url: createURL("updatePhysicalNetwork&id=" + selectedPhysicalNetworkObj.id + array1.join("")),
-                                        dataType: "json",
-                                        success: function(json) {
-                                            var jobId = json.updatephysicalnetworkresponse.jobid;
-                                            args.response.success({
-                                                _custom: {
-                                                    jobId: jobId
-                                                }
-                                            });
-                                        },
-
-                                        error: function(json) {
-                                            args.response.error(parseXMLHttpResponse(json));
-
-                                        }
-
-                                    });
-
-                                },
-                                notification: {
-                                    poll: pollAsyncJobResult
-                                }
-
                             }
-
                         },
 
                         tabFilter: function(args) {
@@ -1276,14 +1147,9 @@
                                         label: 'label.state'
                                     },
                                     vlan: {
-                                        label: 'VLAN Range(s)'
-                                        // isEditable: true
-                                    },
-                                    /*  endVlan: {
-                      label: 'label.end.vlan',
-                      isEditable: true
-                    },*/
-
+                                        label: 'VLAN Range(s)',
+                                        isEditable: true
+                                    },   
                                     tags: {
                                         label: 'Tags',
                                         isEditable: true
@@ -6923,16 +6789,16 @@
 
                                                         action: function(args) {
                                                             $.ajax({
-                                                                url: createURL("scaleVirtualMachine&id=" + args.context.systemVMs[0].id + "&serviceofferingid=" + args.data.serviceOfferingId),
+                                                                url: createURL("scaleSystemVm&id=" + args.context.systemVMs[0].id + "&serviceofferingid=" + args.data.serviceOfferingId),
                                                                 dataType: "json",
                                                                 async: true,
                                                                 success: function(json) {
-                                                                    var jid = json.scalevirtualmachineresponse.jobid;
+                                                                    var jid = json.changeserviceforsystemvmresponse.jobid;
                                                                     args.response.success({
                                                                         _custom: {
                                                                             jobId: jid,
                                                                             getUpdatedItem: function(json) {
-                                                                                return json.queryasyncjobresultresponse.jobresult.virtualmachine;
+                                                                                return json.queryasyncjobresultresponse.jobresult.systemvm;
                                                                             },
                                                                             getActionFilter: function() {
                                                                                 return systemvmActionfilter;
@@ -7951,16 +7817,16 @@
 
                                 action: function(args) {
                                     $.ajax({
-                                        url: createURL("scaleVirtualMachine&id=" + args.context.routers[0].id + "&serviceofferingid=" + args.data.serviceOfferingId),
+                                        url: createURL("scaleSystemVm&id=" + args.context.routers[0].id + "&serviceofferingid=" + args.data.serviceOfferingId),
                                         dataType: "json",
                                         async: true,
                                         success: function(json) {
-                                            var jid = json.scalevirtualmachineresponse.jobid;
+                                            var jid = json.changeserviceforsystemvmresponse.jobid;
                                             args.response.success({
                                                 _custom: {
                                                     jobId: jid,
                                                     getUpdatedItem: function(json) {
-                                                        return json.queryasyncjobresultresponse.jobresult.virtualmachine;
+                                                        return json.queryasyncjobresultresponse.jobresult.systemvm;
                                                     },
                                                     getActionFilter: function() {
                                                         return routerActionfilter;
@@ -8570,16 +8436,16 @@
 
                                 action: function(args) {
                                     $.ajax({
-                                        url: createURL("scaleVirtualMachine&id=" + args.context.systemVMs[0].id + "&serviceofferingid=" + args.data.serviceOfferingId),
+                                        url: createURL("scaleSystemVm&id=" + args.context.systemVMs[0].id + "&serviceofferingid=" + args.data.serviceOfferingId),
                                         dataType: "json",
                                         async: true,
                                         success: function(json) {
-                                            var jid = json.scalevirtualmachineresponse.jobid;
+                                            var jid = json.changeserviceforsystemvmresponse.jobid;
                                             args.response.success({
                                                 _custom: {
                                                     jobId: jid,
                                                     getUpdatedItem: function(json) {
-                                                        return json.queryasyncjobresultresponse.jobresult.virtualmachine;
+                                                        return json.queryasyncjobresultresponse.jobresult.systemvm;
                                                     },
                                                     getActionFilter: function() {
                                                         return vmActionfilter;
