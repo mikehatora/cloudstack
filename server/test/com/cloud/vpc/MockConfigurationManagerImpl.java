@@ -25,9 +25,9 @@ import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 import javax.naming.NamingException;
 
+import org.springframework.stereotype.Component;
+
 import org.apache.cloudstack.api.command.admin.config.UpdateCfgCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPConfigCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPRemoveCmd;
 import org.apache.cloudstack.api.command.admin.network.CreateNetworkOfferingCmd;
 import org.apache.cloudstack.api.command.admin.network.DeleteNetworkOfferingCmd;
 import org.apache.cloudstack.api.command.admin.network.UpdateNetworkOfferingCmd;
@@ -50,10 +50,9 @@ import org.apache.cloudstack.api.command.admin.zone.CreateZoneCmd;
 import org.apache.cloudstack.api.command.admin.zone.DeleteZoneCmd;
 import org.apache.cloudstack.api.command.admin.zone.UpdateZoneCmd;
 import org.apache.cloudstack.api.command.user.network.ListNetworkOfferingsCmd;
+import org.apache.cloudstack.config.Configuration;
 import org.apache.cloudstack.region.PortableIp;
 import org.apache.cloudstack.region.PortableIpRange;
-
-import org.springframework.stereotype.Component;
 
 import com.cloud.configuration.ConfigurationManager;
 import com.cloud.configuration.ConfigurationService;
@@ -86,41 +85,6 @@ import com.cloud.storage.DiskOfferingVO;
 import com.cloud.user.Account;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.vm.VirtualMachine.Type;
-
-import org.apache.cloudstack.api.command.admin.config.UpdateCfgCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPConfigCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPRemoveCmd;
-import org.apache.cloudstack.api.command.admin.network.CreateNetworkOfferingCmd;
-import org.apache.cloudstack.api.command.admin.network.DeleteNetworkOfferingCmd;
-import org.apache.cloudstack.api.command.admin.network.UpdateNetworkOfferingCmd;
-import org.apache.cloudstack.api.command.admin.offering.CreateDiskOfferingCmd;
-import org.apache.cloudstack.api.command.admin.offering.CreateServiceOfferingCmd;
-import org.apache.cloudstack.api.command.admin.offering.DeleteDiskOfferingCmd;
-import org.apache.cloudstack.api.command.admin.offering.DeleteServiceOfferingCmd;
-import org.apache.cloudstack.api.command.admin.offering.UpdateDiskOfferingCmd;
-import org.apache.cloudstack.api.command.admin.offering.UpdateServiceOfferingCmd;
-import org.apache.cloudstack.api.command.admin.pod.DeletePodCmd;
-import org.apache.cloudstack.api.command.admin.pod.UpdatePodCmd;
-import org.apache.cloudstack.api.command.admin.vlan.CreateVlanIpRangeCmd;
-import org.apache.cloudstack.api.command.admin.vlan.DedicatePublicIpRangeCmd;
-import org.apache.cloudstack.api.command.admin.vlan.DeleteVlanIpRangeCmd;
-import org.apache.cloudstack.api.command.admin.vlan.ReleasePublicIpRangeCmd;
-import org.apache.cloudstack.api.command.admin.zone.CreateZoneCmd;
-import org.apache.cloudstack.api.command.admin.zone.DeleteZoneCmd;
-import org.apache.cloudstack.api.command.admin.zone.UpdateZoneCmd;
-import org.apache.cloudstack.api.command.user.network.ListNetworkOfferingsCmd;
-import org.apache.cloudstack.config.Configuration;
-
-import org.springframework.stereotype.Component;
-
-import javax.ejb.Local;
-import javax.inject.Inject;
-import javax.naming.ConfigurationException;
-import javax.naming.NamingException;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 @Component
 @Local(value = { ConfigurationManager.class, ConfigurationService.class })
@@ -309,14 +273,6 @@ public class MockConfigurationManagerImpl extends ManagerBase implements Configu
     }
 
     /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#getNetworkOffering(long)
-     */
-    @Override
-    public NetworkOffering getNetworkOffering(long id) {
-        return _ntwkOffDao.findById(id);
-    }
-
-    /* (non-Javadoc)
      * @see com.cloud.configuration.ConfigurationService#getNetworkOfferingNetworkRate(long)
      */
     @Override
@@ -344,24 +300,6 @@ public class MockConfigurationManagerImpl extends ManagerBase implements Configu
     }
 
     /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#getZone(long)
-     */
-    @Override
-    public DataCenter getZone(long id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#getServiceOffering(long)
-     */
-    @Override
-    public ServiceOffering getServiceOffering(long serviceOfferingId) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
      * @see com.cloud.configuration.ConfigurationService#getDefaultPageSize()
      */
     @Override
@@ -374,42 +312,6 @@ public class MockConfigurationManagerImpl extends ManagerBase implements Configu
      */
     @Override
     public Integer getServiceOfferingNetworkRate(long serviceOfferingId, Long dataCenterId) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#getDiskOffering(long)
-     */
-    @Override
-    public DiskOffering getDiskOffering(long diskOfferingId) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#updateLDAP(org.apache.cloudstack.api.commands.LDAPConfigCmd)
-     */
-    @Override
-    public boolean updateLDAP(LDAPConfigCmd cmd) throws NamingException {
-        // TODO Auto-generated method stub
-        return false;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#removeLDAP(org.apache.cloudstack.api.commands.LDAPRemoveCmd)
-     */
-    @Override
-    public boolean removeLDAP(LDAPRemoveCmd cmd) {
-        // TODO Auto-generated method stub
-        return false;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationService#listLDAPConfig(org.apache.cloudstack.api.commands.LDAPConfigCmd)
-     */
-    @Override
-    public LDAPConfigCmd listLDAPConfig(LDAPConfigCmd cmd) {
         // TODO Auto-generated method stub
         return null;
     }
@@ -518,24 +420,6 @@ public class MockConfigurationManagerImpl extends ManagerBase implements Configu
     }
 
     /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationManager#csvTagsToList(java.lang.String)
-     */
-    @Override
-    public List<String> csvTagsToList(String tags) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationManager#listToCsvTags(java.util.List)
-     */
-    @Override
-    public String listToCsvTags(List<String> tags) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
      * @see com.cloud.configuration.ConfigurationManager#checkZoneAccess(com.cloud.user.Account, com.cloud.dc.DataCenter)
      */
     @Override
@@ -584,24 +468,6 @@ public class MockConfigurationManagerImpl extends ManagerBase implements Configu
     }
 
     /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationManager#getPod(long)
-     */
-    @Override
-    public HostPodVO getPod(long id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationManager#getCluster(long)
-     */
-    @Override
-    public ClusterVO getCluster(long id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
      * @see com.cloud.configuration.ConfigurationManager#deleteAccountSpecificVirtualRanges(long)
      */
     @Override
@@ -642,15 +508,6 @@ public class MockConfigurationManagerImpl extends ManagerBase implements Configu
      */
     @Override
     public AllocationState findClusterAllocationState(ClusterVO cluster) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    /* (non-Javadoc)
-     * @see com.cloud.configuration.ConfigurationManager#cleanupTags(java.lang.String)
-     */
-    @Override
-    public String cleanupTags(String tags) {
         // TODO Auto-generated method stub
         return null;
     }

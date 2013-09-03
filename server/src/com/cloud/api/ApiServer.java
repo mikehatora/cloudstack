@@ -114,14 +114,14 @@ import org.apache.cloudstack.api.response.CreateCmdResponse;
 import org.apache.cloudstack.api.response.ExceptionResponse;
 import org.apache.cloudstack.api.response.ListResponse;
 import org.apache.cloudstack.context.CallContext;
+import org.apache.cloudstack.framework.config.ConfigurationVO;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.framework.jobs.AsyncJob;
 import org.apache.cloudstack.framework.jobs.AsyncJobManager;
 import org.apache.cloudstack.framework.jobs.impl.AsyncJobVO;
 
 import com.cloud.api.response.ApiResponseSerializer;
 import com.cloud.configuration.Config;
-import com.cloud.configuration.ConfigurationVO;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.domain.Domain;
 import com.cloud.domain.DomainVO;
 import com.cloud.event.ActionEventUtils;
@@ -316,7 +316,7 @@ public class ApiServer extends ManagerBase implements HttpRequestHandler, ApiSer
                 throw e;
             }
         } finally {
-            s_accessLogger.info(StringUtils.cleanString(sb.toString()));
+            s_accessLogger.info(sb.toString());
             CallContext.unregister();
         }
     }
@@ -524,7 +524,7 @@ public class ApiServer extends ManagerBase implements HttpRequestHandler, ApiSer
                 String objUuid = (objectUuid == null) ? objectId.toString() : objectUuid;
                 return getBaseAsyncCreateResponse(jobId, (BaseAsyncCreateCmd)asyncCmd, objUuid);
             } else {
-            SerializationContext.current().setUuidTranslation(true);
+                SerializationContext.current().setUuidTranslation(true);
                 return getBaseAsyncResponse(jobId, asyncCmd);
             }
         } else {
@@ -581,8 +581,8 @@ public class ApiServer extends ManagerBase implements HttpRequestHandler, ApiSer
                     continue;
                 }
                 String instanceUuid = ApiDBUtils.findJobInstanceUuid(job);
-                    objectJobMap.put(instanceUuid, job);
-                }
+                objectJobMap.put(instanceUuid, job);
+            }
 
             for (ResponseObject response : responses) {
                 if (response.getObjectId() != null && objectJobMap.containsKey(response.getObjectId())) {

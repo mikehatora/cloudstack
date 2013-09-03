@@ -31,7 +31,7 @@ public class VolumeObjectTO implements DataTO {
     private Volume.Type volumeType;
     private DataStoreTO dataStore;
     private String name;
-    private long size;
+    private Long size;
     private String path;
     private Long volumeId;
     private String vmName;
@@ -111,7 +111,7 @@ public class VolumeObjectTO implements DataTO {
         return this.name;
     }
 
-    public long getSize() {
+    public Long getSize() {
         return this.size;
     }
 

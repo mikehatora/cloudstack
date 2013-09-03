@@ -21,6 +21,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -39,14 +40,8 @@ import javax.naming.NamingException;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
 
-import org.apache.log4j.Logger;
-import org.springframework.stereotype.Component;
-
 import org.apache.cloudstack.acl.SecurityChecker;
-import org.apache.cloudstack.api.ApiConstants.LDAPParams;
 import org.apache.cloudstack.api.command.admin.config.UpdateCfgCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPConfigCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPRemoveCmd;
 import org.apache.cloudstack.api.command.admin.network.CreateNetworkOfferingCmd;
 import org.apache.cloudstack.api.command.admin.network.DeleteNetworkOfferingCmd;
 import org.apache.cloudstack.api.command.admin.network.UpdateNetworkOfferingCmd;
@@ -69,12 +64,11 @@ import org.apache.cloudstack.api.command.admin.zone.CreateZoneCmd;
 import org.apache.cloudstack.api.command.admin.zone.DeleteZoneCmd;
 import org.apache.cloudstack.api.command.admin.zone.UpdateZoneCmd;
 import org.apache.cloudstack.api.command.user.network.ListNetworkOfferingsCmd;
-import org.apache.cloudstack.config.ConfigDepot;
-import org.apache.cloudstack.config.ConfigKey;
-import org.apache.cloudstack.config.ConfigValue;
 import org.apache.cloudstack.config.Configuration;
 import org.apache.cloudstack.context.CallContext;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
+import org.apache.cloudstack.framework.config.ConfigurationVO;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.region.PortableIp;
 import org.apache.cloudstack.region.PortableIpDao;
 import org.apache.cloudstack.region.PortableIpRange;
@@ -82,17 +76,18 @@ import org.apache.cloudstack.region.PortableIpRangeDao;
 import org.apache.cloudstack.region.PortableIpRangeVO;
 import org.apache.cloudstack.region.PortableIpVO;
 import org.apache.cloudstack.region.Region;
+import org.apache.cloudstack.region.RegionVO;
 import org.apache.cloudstack.region.dao.RegionDao;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolDetailVO;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolDetailsDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
+import org.apache.log4j.Logger;
 
 import com.cloud.alert.AlertManager;
 import com.cloud.api.ApiDBUtils;
 import com.cloud.capacity.dao.CapacityDao;
 import com.cloud.configuration.Resource.ResourceType;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.AccountVlanMapVO;
 import com.cloud.dc.ClusterDetailsDao;
 import com.cloud.dc.ClusterDetailsVO;
@@ -134,6 +129,7 @@ import com.cloud.exception.PermissionDeniedException;
 import com.cloud.exception.ResourceAllocationException;
 import com.cloud.exception.ResourceUnavailableException;
 import com.cloud.hypervisor.Hypervisor.HypervisorType;
+import com.cloud.network.IpAddressManager;
 import com.cloud.network.Network;
 import com.cloud.network.Network.Capability;
 import com.cloud.network.Network.GuestType;
@@ -205,12 +201,9 @@ import com.cloud.vm.dao.NicIpAliasDao;
 import com.cloud.vm.dao.NicIpAliasVO;
 import com.cloud.vm.dao.NicSecondaryIpDao;
 
-import edu.emory.mathcs.backport.java.util.Arrays;
-
-@Component
 @Local(value = { ConfigurationManager.class, ConfigurationService.class })
-public class ConfigurationManagerImpl extends ManagerBase implements ConfigurationManager, ConfigurationService, ConfigDepot {
-    public static final Logger s_logger = Logger.getLogger(ConfigurationManagerImpl.class.getName());
+public class ConfigurationManagerImpl extends ManagerBase implements ConfigurationManager, ConfigurationService {
+    public static final Logger s_logger = Logger.getLogger(ConfigurationManagerImpl.class);
 
     @Inject
     EntityManager _entityMgr;
@@ -306,6 +299,8 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
     public ManagementService _mgr;
     @Inject
     DedicatedResourceDao _dedicatedDao;
+    @Inject
+    IpAddressManager _ipAddrMgr;
 
     // FIXME - why don't we have interface for DataCenterLinkLocalIpAddressDao?
     @Inject
@@ -688,19 +683,24 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
     private String validateConfigurationValue(String name, String value, String scope) {
 
-        Config c = Config.getConfig(name);
-        if (c == null) {
+        ConfigurationVO cfg = _configDao.findByName(name);
+        if (cfg == null) {
             s_logger.error("Missing configuration variable " + name + " in configuration table");
             return "Invalid configuration variable.";
         }
-        String configScope = c.getScope();
+
+        String configScope = cfg.getScope();
         if (scope != null) {
             if (!configScope.contains(scope)) {
                 s_logger.error("Invalid scope id provided for the parameter " + name);
                 return "Invalid scope id provided for the parameter " + name;
             }
         }
-
+        Config c = Config.getConfig(name);
+        if (c == null) {
+            s_logger.warn("Did not find configuration " + name + " in Config.java. Perhaps moved to ConfigDepot?");
+            return null;
+        }
         Class<?> type = c.getType();
 
         if (value == null) {
@@ -1546,175 +1546,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
     @Override
     @DB
-    public boolean removeLDAP(LDAPRemoveCmd cmd) {
-        _configDao.expunge(LDAPParams.hostname.toString());
-        _configDao.expunge(LDAPParams.port.toString());
-        _configDao.expunge(LDAPParams.queryfilter.toString());
-        _configDao.expunge(LDAPParams.searchbase.toString());
-        _configDao.expunge(LDAPParams.usessl.toString());
-        _configDao.expunge(LDAPParams.dn.toString());
-        _configDao.expunge(LDAPParams.passwd.toString());
-        _configDao.expunge(LDAPParams.truststore.toString());
-        _configDao.expunge(LDAPParams.truststorepass.toString());
-        return true;
-    }
-
-    @Override
-    @DB
-    public LDAPConfigCmd listLDAPConfig(LDAPConfigCmd cmd) {
-        String hostname = _configDao.getValue(LDAPParams.hostname.toString());
-        cmd.setHostname(hostname == null ? "" : hostname);
-        String port = _configDao.getValue(LDAPParams.port.toString());
-        cmd.setPort(port == null ? 0 : Integer.valueOf(port));
-        String queryFilter = _configDao.getValue(LDAPParams.queryfilter.toString());
-        cmd.setQueryFilter(queryFilter == null ? "" : queryFilter);
-        String searchBase = _configDao.getValue(LDAPParams.searchbase.toString());
-        cmd.setSearchBase(searchBase == null ? "" : searchBase);
-        String useSSL = _configDao.getValue(LDAPParams.usessl.toString());
-        cmd.setUseSSL(useSSL == null ? Boolean.FALSE : Boolean.valueOf(useSSL));
-        String binddn = _configDao.getValue(LDAPParams.dn.toString());
-        cmd.setBindDN(binddn == null ? "" : binddn);
-        String truststore = _configDao.getValue(LDAPParams.truststore.toString());
-        cmd.setTrustStore(truststore == null ? "" : truststore);
-        return cmd;
-    }
-
-    @Override
-    @DB
-    public boolean updateLDAP(LDAPConfigCmd cmd) {
-        try {
-            // set the ldap details in the zone details table with a zone id of
-            // -12
-            String hostname = cmd.getHostname();
-            Integer port = cmd.getPort();
-            String queryFilter = cmd.getQueryFilter();
-            String searchBase = cmd.getSearchBase();
-            Boolean useSSL = cmd.getUseSSL();
-            String bindDN = cmd.getBindDN();
-            String bindPasswd = cmd.getBindPassword();
-            String trustStore = cmd.getTrustStore();
-            String trustStorePassword = cmd.getTrustStorePassword();
-
-            if (bindDN != null && bindPasswd == null) {
-                throw new InvalidParameterValueException(
-                        "If you specify a bind name then you need to provide bind password too.");
-            }
-
-            // check query filter if it contains valid substitution
-            if (!queryFilter.contains("%u") && !queryFilter.contains("%n") && !queryFilter.contains("%e")) {
-                throw new InvalidParameterValueException(
-                        "QueryFilter should contain at least one of the substitutions: %u, %n or %e: " + queryFilter);
-            }
-
-            // check if the info is correct
-            Hashtable<String, String> env = new Hashtable<String, String>(11);
-            env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
-            String protocol = "ldap://";
-            if (useSSL) {
-                env.put(Context.SECURITY_PROTOCOL, "ssl");
-                protocol = "ldaps://";
-                if (trustStore == null || trustStorePassword == null) {
-                    throw new InvalidParameterValueException(
-                            "If you plan to use SSL then you need to configure the trust store.");
-                }
-                System.setProperty("javax.net.ssl.trustStore", trustStore);
-                System.setProperty("javax.net.ssl.trustStorePassword", trustStorePassword);
-            }
-            env.put(Context.PROVIDER_URL, protocol + hostname + ":" + port);
-            if (bindDN != null && bindPasswd != null) {
-                env.put(Context.SECURITY_AUTHENTICATION, "simple");
-                env.put(Context.SECURITY_PRINCIPAL, bindDN);
-                env.put(Context.SECURITY_CREDENTIALS, bindPasswd);
-            }
-            // Create the initial context
-            DirContext ctx = new InitialDirContext(env);
-            ctx.close();
-
-            // store the result in DB Configuration
-            ConfigurationVO cvo = _configDao.findByName(LDAPParams.hostname.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.hostname.toString(),
-                        null, "Hostname or ip address of the ldap server eg: my.ldap.com");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(hostname));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.port.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.port.toString(), null,
-                        "Specify the LDAP port if required, default is 389");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(port.toString()));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.queryfilter.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.queryfilter.toString(),
-                        null,
-                        "You specify a query filter here, which narrows down the users, who can be part of this domain");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(queryFilter));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.searchbase.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.searchbase.toString(),
-                        null,
-                        "The search base defines the starting point for the search in the directory tree Example:  dc=cloud,dc=com.");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(searchBase));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.usessl.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.usessl.toString(), null,
-                        "Check Use SSL if the external LDAP server is configured for LDAP over SSL.");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(useSSL.toString()));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.dn.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.dn.toString(), null,
-                        "Specify the distinguished name of a user with the search permission on the directory");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(bindDN));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.passwd.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.passwd.toString(), null,
-                        "Enter the password");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(bindPasswd));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.truststore.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server", LDAPParams.truststore.toString(),
-                        null, "Enter the path to trusted keystore");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(trustStore));
-            _configDao.persist(cvo);
-
-            cvo = _configDao.findByName(LDAPParams.truststorepass.toString());
-            if (cvo == null) {
-                cvo = new ConfigurationVO("Hidden", "DEFAULT", "management-server",
-                        LDAPParams.truststorepass.toString(), null, "Enter the password for trusted keystore");
-            }
-            cvo.setValue(DBEncryptionUtil.encrypt(trustStorePassword));
-            _configDao.persist(cvo);
-
-            s_logger.debug("The ldap server is configured: " + hostname);
-        } catch (NamingException ne) {
-            throw new InvalidParameterValueException("Naming Exception, check you ldap data ! " + ne.getMessage()
-                    + (ne.getCause() != null ? ("; Caused by:" + ne.getCause().getMessage()) : ""));
-        }
-        return true;
-    }
-
-    @Override
-    @DB
     @ActionEvent(eventType = EventTypes.EVENT_ZONE_EDIT, eventDescription = "editing zone", async = false)
     public DataCenter editZone(UpdateZoneCmd cmd) {
         // Parameter validation as from execute() method in V1
@@ -2190,7 +2021,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             String name, int cpu, int ramSize, int speed, String displayText, boolean localStorageRequired,
             boolean offerHA, boolean limitResourceUse, boolean volatileVm,  String tags, Long domainId, String hostTag,
             Integer networkRate, String deploymentPlanner, Map<String, String> details, Long bytesReadRate, Long bytesWriteRate, Long iopsReadRate, Long iopsWriteRate) {
-        tags = cleanupTags(tags);
+        tags = StringUtils.cleanupTags(tags);
         ServiceOfferingVO offering = new ServiceOfferingVO(name, cpu, ramSize, speed, networkRate, null, offerHA,
                 limitResourceUse, volatileVm, displayText, localStorageRequired, false, tags, isSystem, vm_type,
                 domainId, hostTag, deploymentPlanner);
@@ -2229,7 +2060,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         }
 
         // Verify input parameters
-        ServiceOffering offeringHandle = getServiceOffering(id);
+        ServiceOffering offeringHandle = _entityMgr.findById(ServiceOffering.class, id);
 
         if (offeringHandle == null) {
             throw new InvalidParameterValueException("unable to find service offering " + id);
@@ -2342,7 +2173,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             maxIops = null;
         }
 
-        tags = cleanupTags(tags);
+        tags = StringUtils.cleanupTags(tags);
         DiskOfferingVO newDiskOffering = new DiskOfferingVO(domainId, name, description, diskSize, tags, isCustomized,
         		isCustomizedIops, minIops, maxIops);
         newDiskOffering.setUseLocalStorage(localStorageRequired);
@@ -2420,7 +2251,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         Integer sortKey = cmd.getSortKey();
 
         // Check if diskOffering exists
-        DiskOffering diskOfferingHandle = getDiskOffering(diskOfferingId);
+        DiskOffering diskOfferingHandle = _entityMgr.findById(DiskOffering.class, diskOfferingId);
 
         if (diskOfferingHandle == null) {
             throw new InvalidParameterValueException("Unable to find disk offering by id " + diskOfferingId);
@@ -2483,13 +2314,14 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
     public boolean deleteDiskOffering(DeleteDiskOfferingCmd cmd) {
         Long diskOfferingId = cmd.getId();
 
-        DiskOffering offering = getDiskOffering(diskOfferingId);
+        DiskOfferingVO offering = _diskOfferingDao.findById(diskOfferingId);
 
         if (offering == null) {
             throw new InvalidParameterValueException("Unable to find disk offering by id " + diskOfferingId);
         }
 
-        if (_diskOfferingDao.remove(diskOfferingId)) {
+        offering.setState(DiskOffering.State.Inactive);
+        if (_diskOfferingDao.update(offering.getId(), offering)) {
             CallContext.current().setEventDetails("Disk offering id=" + diskOfferingId);
             return true;
         } else {
@@ -2509,7 +2341,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         }
 
         // Verify service offering id
-        ServiceOffering offering = getServiceOffering(offeringId);
+        ServiceOfferingVO offering = _serviceOfferingDao.findById(offeringId);
         if (offering == null) {
             throw new InvalidParameterValueException("unable to find service offering " + offeringId);
         }
@@ -2518,7 +2350,8 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             throw new InvalidParameterValueException("Default service offerings cannot be deleted");
         }
 
-        if (_serviceOfferingDao.remove(offeringId)) {
+        offering.setState(DiskOffering.State.Inactive);
+        if (_serviceOfferingDao.update(offeringId, offering)) {
             CallContext.current().setEventDetails("Service offering id=" + offeringId);
             return true;
         } else {
@@ -3211,7 +3044,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                                     + " belonging to the range has firewall rules applied. Cleanup the rules first");
                         }
                         // release public ip address here
-                        success = success && _networkMgr.disassociatePublicIpAddress(ip.getId(), userId, caller);
+                        success = success && _ipAddrMgr.disassociatePublicIpAddress(ip.getId(), userId, caller);
                     }
                     if (!success) {
                         s_logger.warn("Some ip addresses failed to be released as a part of vlan " + vlanDbId
@@ -3394,7 +3227,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                             s_logger.debug("Releasing Public IP addresses" + ip + " of vlan " + vlanDbId
                                     + " as part of Public IP" + " range release to the system pool");
                         }
-                        success = success && _networkMgr.disassociatePublicIpAddress(ip.getId(), userId, caller);
+                        success = success && _ipAddrMgr.disassociatePublicIpAddress(ip.getId(), userId, caller);
                     } else {
                         ipsInUse.add(ip);
                     }
@@ -3425,50 +3258,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         } else {
             return false;
         }
-    }
-
-    @Override
-    public List<String> csvTagsToList(String tags) {
-        List<String> tagsList = new ArrayList<String>();
-
-        if (tags != null) {
-            String[] tokens = tags.split(",");
-            for (int i = 0; i < tokens.length; i++) {
-                tagsList.add(tokens[i].trim());
-            }
-        }
-
-        return tagsList;
-    }
-
-    @Override
-    public String listToCsvTags(List<String> tagsList) {
-        String tags = "";
-        if (tagsList.size() > 0) {
-            for (int i = 0; i < tagsList.size(); i++) {
-                tags += tagsList.get(i);
-                if (i != tagsList.size() - 1) {
-                    tags += ",";
-                }
-            }
-        }
-
-        return tags;
-    }
-
-    @Override
-    public String cleanupTags(String tags) {
-        if (tags != null) {
-            String[] tokens = tags.split(",");
-            StringBuilder t = new StringBuilder();
-            for (int i = 0; i < tokens.length; i++) {
-                t.append(tokens[i].trim()).append(",");
-            }
-            t.delete(t.length() - 1, t.length());
-            tags = t.toString();
-        }
-
-        return tags;
     }
 
     @DB
@@ -4119,7 +3908,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
         String multicastRateStr = _configDao.getValue("multicast.throttling.rate");
         int multicastRate = ((multicastRateStr == null) ? 10 : Integer.parseInt(multicastRateStr));
-        tags = cleanupTags(tags);
+        tags = StringUtils.cleanupTags(tags);
 
         // specifyVlan should always be true for Shared network offerings
         if (!specifyVlan && type == GuestType.Shared) {
@@ -4380,7 +4169,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         Boolean forVpc = cmd.getForVpc();
 
         if (zoneId != null) {
-            zone = getZone(zoneId);
+            zone = _entityMgr.findById(DataCenter.class, zoneId);
             if (zone == null) {
                 throw new InvalidParameterValueException("Unable to find the zone by id=" + zoneId);
             }
@@ -4417,9 +4206,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         }
 
         // only root admin can list network offering with specifyVlan = true
-        if(caller.getType() != Account.ACCOUNT_TYPE_ADMIN){
-            specifyVlan = false;
-        }
         if (specifyVlan != null) {
             sc.addAnd("specifyVlan", SearchCriteria.Op.EQ, specifyVlan);
         }
@@ -4772,20 +4558,10 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
     }
 
     @Override
-    public DataCenterVO getZone(long id) {
-        return _zoneDao.findById(id);
-    }
-
-    @Override
-    public NetworkOffering getNetworkOffering(long id) {
-        return _networkOfferingDao.findById(id);
-    }
-
-    @Override
     public Integer getNetworkOfferingNetworkRate(long networkOfferingId, Long dataCenterId) {
 
         // validate network offering information
-        NetworkOffering no = getNetworkOffering(networkOfferingId);
+        NetworkOffering no = _entityMgr.findById(NetworkOffering.class, networkOfferingId);
         if (no == null) {
             throw new InvalidParameterValueException("Unable to find network offering by id=" + networkOfferingId);
         }
@@ -4873,16 +4649,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
     }
 
     @Override
-    public HostPodVO getPod(long id) {
-        return _podDao.findById(id);
-    }
-
-    @Override
-    public ClusterVO getCluster(long id) {
-        return _clusterDao.findById(id);
-    }
-
-    @Override
     public AllocationState findClusterAllocationState(ClusterVO cluster) {
 
         if (cluster.getAllocationState() == AllocationState.Disabled) {
@@ -4906,16 +4672,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         }
     }
 
-
-    @Override
-    public ServiceOffering getServiceOffering(long serviceOfferingId) {
-        ServiceOfferingVO offering = _serviceOfferingDao.findById(serviceOfferingId);
-        if (offering != null && offering.getRemoved() == null) {
-            return offering;
-        }
-
-        return null;
-    }
 
     @Override
     public Long getDefaultPageSize() {
@@ -4957,16 +4713,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
     }
 
     @Override
-    public DiskOffering getDiskOffering(long diskOfferingId) {
-        DiskOfferingVO offering = _diskOfferingDao.findById(diskOfferingId);
-        if (offering != null && offering.getRemoved() == null) {
-            return offering;
-        }
-
-        return null;
-    }
-
-    @Override
     @DB
     @ActionEvent(eventType = EventTypes.EVENT_PORTABLE_IP_RANGE_CREATE,
             eventDescription = "creating portable ip range", async = false)
@@ -4978,7 +4724,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         String netmask = cmd.getNetmask();
         String vlanId = cmd.getVlan();
 
-        Region region = _regionDao.findById(regionId);
+        RegionVO region = _regionDao.findById(regionId);
         if (region == null) {
             throw new InvalidParameterValueException("Invalid region ID: " + regionId);
         }
@@ -5037,6 +4783,10 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             startIpLong++;
         }
 
+        // implicitly enable portable IP service for the region
+        region.setPortableipEnabled(true);
+        _regionDao.update(region.getId(), region);
+
         txn.commit();
         portableIpLock.unlock();
         return portableIpRange;
@@ -5048,6 +4798,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             eventDescription = "deleting portable ip range", async = false)
     public boolean deletePortableIpRange(DeletePortableIpRangeCmd cmd) {
         long rangeId = cmd.getId();
+
         PortableIpRangeVO portableIpRange = _portableIpRangeDao.findById(rangeId);
         if (portableIpRange == null) {
             throw new InvalidParameterValueException("Please specify a valid portable IP range id.");
@@ -5060,12 +4811,17 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         if (fullIpRange != null && freeIpRange != null) {
             if (fullIpRange.size() == freeIpRange.size()) {
                 _portableIpRangeDao.expunge(portableIpRange.getId());
+                List<PortableIpRangeVO> pipranges = _portableIpRangeDao.listAll();
+                if (pipranges == null || pipranges.isEmpty()) {
+                    RegionVO region = _regionDao.findById(portableIpRange.getRegionId());
+                    region.setPortableipEnabled(false);
+                    _regionDao.update(region.getId(), region);
+                }
                 return true;
             } else {
                 throw new InvalidParameterValueException("Can't delete portable IP range as there are IP's assigned.");
             }
         }
-
         return false;
     }
 
@@ -5128,8 +4884,5 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         return false;
     }
 
-    @Override
-    public <T> ConfigValue<T> get(ConfigKey<T> config) {
-        return new ConfigValue<T>(_entityMgr, config);
-    }
+
 }

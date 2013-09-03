@@ -31,6 +31,7 @@ import org.apache.cloudstack.api.command.user.snapshot.DeleteSnapshotPoliciesCmd
 import org.apache.cloudstack.api.command.user.snapshot.ListSnapshotPoliciesCmd;
 import org.apache.cloudstack.api.command.user.snapshot.ListSnapshotsCmd;
 import org.apache.cloudstack.context.CallContext;
+import org.apache.cloudstack.engine.orchestration.service.VolumeOrchestrationService;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStore;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
 import org.apache.cloudstack.engine.subsystem.api.storage.EndPoint;
@@ -42,10 +43,12 @@ import org.apache.cloudstack.engine.subsystem.api.storage.SnapshotStrategy;
 import org.apache.cloudstack.engine.subsystem.api.storage.VolumeDataFactory;
 import org.apache.cloudstack.engine.subsystem.api.storage.VolumeInfo;
 import org.apache.cloudstack.engine.subsystem.api.storage.ZoneScope;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.SnapshotDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.SnapshotDataStoreVO;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
+
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Component;
 
@@ -57,7 +60,6 @@ import com.cloud.alert.AlertManager;
 import com.cloud.api.commands.ListRecurringSnapshotScheduleCmd;
 import com.cloud.configuration.Config;
 import com.cloud.configuration.Resource.ResourceType;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.ClusterVO;
 import com.cloud.dc.dao.ClusterDao;
 import com.cloud.dc.dao.DataCenterDao;
@@ -91,7 +93,6 @@ import com.cloud.storage.StorageManager;
 import com.cloud.storage.StoragePool;
 import com.cloud.storage.VMTemplateVO;
 import com.cloud.storage.Volume;
-import com.cloud.storage.VolumeManager;
 import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.DiskOfferingDao;
 import com.cloud.storage.dao.SnapshotDao;
@@ -125,6 +126,7 @@ import com.cloud.utils.db.SearchCriteria;
 import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.vm.UserVmVO;
 import com.cloud.vm.VMInstanceVO;
+import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.VirtualMachine.State;
 import com.cloud.vm.dao.UserVmDao;
 import com.cloud.vm.snapshot.VMSnapshot;
@@ -189,7 +191,7 @@ public class SnapshotManagerImpl extends ManagerBase implements SnapshotManager,
     private VMSnapshotDao _vmSnapshotDao;
     String _name;
     @Inject TemplateManager templateMgr;
-    @Inject VolumeManager volumeMgr;
+    @Inject VolumeOrchestrationService volumeMgr;
     @Inject DataStoreManager dataStoreMgr;
     @Inject SnapshotService snapshotSrv;
     @Inject VolumeDataFactory volFactory;
@@ -904,16 +906,25 @@ public class SnapshotManagerImpl extends ManagerBase implements SnapshotManager,
 
 
 
-    private boolean hostSupportSnapsthot(HostVO host) {
+    private boolean hostSupportSnapsthotForVolume(HostVO host, VolumeInfo volume) {
 		if (host.getHypervisorType() != HypervisorType.KVM) {
 			return true;
 		}
 
-        //Turn off snapshot by default for KVM, unless it is set in the global flag
-        boolean snapshotEnabled = Boolean.parseBoolean(_configDao.getValue("KVM.snapshot.enabled"));
-        if (!snapshotEnabled) {
-             return false;
-        }
+        //Turn off snapshot by default for KVM if the volume attached to vm that is not in the Stopped/Destroyed state,
+		//unless it is set in the global flag
+		Long vmId = volume.getInstanceId();
+		if (vmId != null) {
+		    VMInstanceVO vm = _vmDao.findById(vmId);
+		    if (vm.getState() != VirtualMachine.State.Stopped && vm.getState() != VirtualMachine.State.Destroyed) {
+		        boolean snapshotEnabled = Boolean.parseBoolean(_configDao.getValue("kvm.snapshot.enabled"));
+	            if (!snapshotEnabled) {
+	                 s_logger.debug("Snapshot is not supported on host " + host + " for the volume " + volume + " attached to the vm " + vm);
+	                 return false;
+	            }
+		    }
+		}
+        
 		// Determine host capabilities
 		String caps = host.getCapabilities();
 
@@ -952,7 +963,7 @@ public class SnapshotManagerImpl extends ManagerBase implements SnapshotManager,
             }
             if (hosts != null && !hosts.isEmpty()) {
                 HostVO host = hosts.get(0);
-                if (!hostSupportSnapsthot(host)) {
+                if (!hostSupportSnapsthotForVolume(host, volume)) {
                     throw new CloudRuntimeException("KVM Snapshot is not supported: " + host.getId());
                 }
             }
@@ -1036,7 +1047,7 @@ public class SnapshotManagerImpl extends ManagerBase implements SnapshotManager,
 
         String value = _configDao.getValue(Config.BackupSnapshotWait.toString());
         _backupsnapshotwait = NumbersUtil.parseInt(value, Integer.parseInt(Config.BackupSnapshotWait.getDefaultValue()));
-        backup = Boolean.parseBoolean(_configDao.getValue(Config.BackupSnapshotAferTakingSnapshot.toString()));
+        backup = Boolean.parseBoolean(_configDao.getValue(Config.BackupSnapshotAfterTakingSnapshot.toString()));
 
         Type.HOURLY.setMax(NumbersUtil.parseInt(_configDao.getValue("snapshot.max.hourly"), HOURLYMAX));
         Type.DAILY.setMax(NumbersUtil.parseInt(_configDao.getValue("snapshot.max.daily"), DAILYMAX));

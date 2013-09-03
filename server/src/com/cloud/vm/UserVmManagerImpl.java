@@ -63,9 +63,11 @@ import org.apache.cloudstack.api.command.user.vmgroup.DeleteVMGroupCmd;
 import org.apache.cloudstack.context.CallContext;
 import org.apache.cloudstack.context.ServerContexts;
 import org.apache.cloudstack.engine.cloud.entity.api.VirtualMachineEntity;
+import org.apache.cloudstack.engine.orchestration.service.VolumeOrchestrationService;
 import org.apache.cloudstack.engine.service.api.OrchestrationService;
 import org.apache.cloudstack.engine.subsystem.api.storage.TemplateDataFactory;
 import org.apache.cloudstack.engine.subsystem.api.storage.TemplateInfo;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.framework.jobs.AsyncJobManager;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
@@ -79,7 +81,6 @@ import com.cloud.agent.api.GetVmStatsAnswer;
 import com.cloud.agent.api.GetVmStatsCommand;
 import com.cloud.agent.api.PvlanSetupCommand;
 import com.cloud.agent.api.StartAnswer;
-import com.cloud.agent.api.StopAnswer;
 import com.cloud.agent.api.VmDiskStatsEntry;
 import com.cloud.agent.api.VmStatsEntry;
 import com.cloud.agent.api.to.DiskTO;
@@ -94,7 +95,6 @@ import com.cloud.capacity.CapacityManager;
 import com.cloud.configuration.Config;
 import com.cloud.configuration.ConfigurationManager;
 import com.cloud.configuration.Resource.ResourceType;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.DataCenter;
 import com.cloud.dc.DataCenter.NetworkType;
 import com.cloud.dc.DataCenterVO;
@@ -194,7 +194,6 @@ import com.cloud.storage.StoragePoolStatus;
 import com.cloud.storage.VMTemplateVO;
 import com.cloud.storage.VMTemplateZoneVO;
 import com.cloud.storage.Volume;
-import com.cloud.storage.VolumeManager;
 import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.DiskOfferingDao;
 import com.cloud.storage.dao.GuestOSCategoryDao;
@@ -233,6 +232,7 @@ import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.concurrency.NamedThreadFactory;
 import com.cloud.utils.crypt.RSAHelper;
 import com.cloud.utils.db.DB;
+import com.cloud.utils.db.EntityManager;
 import com.cloud.utils.db.Filter;
 import com.cloud.utils.db.GlobalLock;
 import com.cloud.utils.db.SearchBuilder;
@@ -270,6 +270,8 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
         linked
     }
 
+    @Inject
+    EntityManager _entityMgr;
     @Inject
     protected HostDao _hostDao = null;
     @Inject
@@ -449,7 +451,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
     @Inject
     protected OrchestrationService _orchSrvc;
 
-    @Inject VolumeManager volumeMgr;
+    @Inject VolumeOrchestrationService volumeMgr;
 
     @Override
     public UserVmVO getVirtualMachine(long vmId) {
@@ -1236,8 +1238,8 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
         _itMgr.checkIfCanUpgrade(vmInstance, newServiceOfferingId);
 
         //Check if its a scale "up"
-        ServiceOffering newServiceOffering = _configMgr.getServiceOffering(newServiceOfferingId);
-        ServiceOffering currentServiceOffering = _configMgr.getServiceOffering(vmInstance.getServiceOfferingId());
+        ServiceOffering newServiceOffering = _entityMgr.findById(ServiceOffering.class, newServiceOfferingId);
+        ServiceOffering currentServiceOffering = _offeringDao.findByIdIncludingRemoved(vmInstance.getServiceOfferingId());
         int newCpu = newServiceOffering.getCpu();
         int newMemory = newServiceOffering.getRamSize();
         int newSpeed = newServiceOffering.getSpeed();
@@ -1248,7 +1250,8 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
         // Don't allow to scale when (Any of the new values less than current values) OR (All current and new values are same)
         if( (newSpeed < currentSpeed || newMemory < currentMemory || newCpu < currentCpu)
                 ||  ( newSpeed == currentSpeed && newMemory == currentMemory && newCpu == currentCpu)){
-            throw new InvalidParameterValueException("Only scaling up the vm is supported, new service offering should have both cpu and memory greater than the old values");
+            throw new InvalidParameterValueException("Only scaling up the vm is supported, new service offering(speed="+ newSpeed + ",cpu=" + newCpu + ",memory=," + newMemory + ")" +
+                    " should have at least one value(cpu/ram) greater than old value and no resource value less than older(speed="+ currentSpeed + ",cpu=" + currentCpu + ",memory=," + currentMemory + ")");
         }
 
         // Check resource limits
@@ -1301,7 +1304,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                     // #3 scale the vm now
                     _itMgr.upgradeVmDb(vmId, newServiceOfferingId);
                     vmInstance = _vmInstanceDao.findById(vmId);
-                    vmInstance = _itMgr.reConfigureVm(vmInstance, currentServiceOffering, existingHostHasCapacity);
+                    _itMgr.reConfigureVm(vmInstance.getUuid(), currentServiceOffering, existingHostHasCapacity);
                     success = true;
                     return success;
                 }catch(InsufficientCapacityException e ){
@@ -1468,8 +1471,6 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
         }
 
         //Update Resource Count for the given account
-        _resourceLimitMgr.incrementResourceCount(account.getId(),
-                ResourceType.volume, new Long(volumes.size()));
         resourceCountIncrement(account.getId(), new Long(serviceOffering.getCpu()),
                 new Long(serviceOffering.getRamSize()));
         txn.commit();
@@ -2453,8 +2454,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                 _networkModel.checkNetworkPermissions(owner, network);
 
                 // don't allow to use system networks
-                NetworkOffering networkOffering = _configMgr
-                        .getNetworkOffering(network.getNetworkOfferingId());
+                NetworkOffering networkOffering = _entityMgr.findById(NetworkOffering.class, network.getNetworkOfferingId());
                 if (networkOffering.isSystemOnly()) {
                     throw new InvalidParameterValueException(
                             "Network id="
@@ -3209,7 +3209,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
     }
 
     @Override
-    public void finalizeStop(VirtualMachineProfile profile, StopAnswer answer) {
+    public void finalizeStop(VirtualMachineProfile profile, Answer answer) {
         VirtualMachine vm = profile.getVirtualMachine();
         // release elastic IP here
         IPAddressVO ip = _ipAddressDao.findByAssociatedVmId(profile.getId());
@@ -3218,7 +3218,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
             try {
                 long networkId = ip.getAssociatedWithNetworkId();
                 Network guestNetwork = _networkDao.findById(networkId);
-                NetworkOffering offering = _configMgr.getNetworkOffering(guestNetwork.getNetworkOfferingId());
+                NetworkOffering offering = _entityMgr.findById(NetworkOffering.class, guestNetwork.getNetworkOfferingId());
                 assert (offering.getAssociatePublicIP() == true) : "User VM should not have system owned public IP associated with it when offering configured not to associate public IP.";
                 _rulesMgr.disableStaticNat(ip.getId(), ctx.getCallingAccount(), ctx.getCallingUserId(), true);
             } catch (Exception ex) {
@@ -3915,6 +3915,18 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                             + destinationHost.getResourceState());
         }
 
+        if (vm.getType() != VirtualMachine.Type.User) {
+            // for System VMs check that the destination host is within the same
+            // cluster
+            HostVO srcHost = _hostDao.findById(srcHostId);
+            if (srcHost != null && srcHost.getClusterId() != null && destinationHost.getClusterId() != null) {
+                if (srcHost.getClusterId().longValue() != destinationHost.getClusterId().longValue()) {
+                    throw new InvalidParameterValueException(
+                            "Cannot migrate the VM, destination host is not in the same cluster as current host of the VM");
+                }
+            }
+        }
+
         checkHostsDedication(vm, srcHostId, destinationHost.getId());
 
          // call to core process
@@ -4548,11 +4560,10 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                 }
             }
 
-            List<Pair<NetworkVO, NicProfile>> networks = new ArrayList<Pair<NetworkVO, NicProfile>>();
+            LinkedHashMap<Network, NicProfile> networks = new LinkedHashMap<Network, NicProfile>();
             NicProfile profile = new NicProfile();
             profile.setDefaultNic(true);
-            networks.add(new Pair<NetworkVO, NicProfile>(networkList.get(0),
-                    profile));
+            networks.put(networkList.get(0), profile);
 
             VirtualMachine vmi = _itMgr.findById(vm.getId());
             VirtualMachineProfileImpl vmProfile = new VirtualMachineProfileImpl(vmi);
@@ -4594,9 +4605,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                         _networkModel.checkNetworkPermissions(newAccount, network);
 
                         // don't allow to use system networks
-                        NetworkOffering networkOffering = _configMgr
-                                .getNetworkOffering(network
-                                        .getNetworkOfferingId());
+                        NetworkOffering networkOffering = _entityMgr.findById(NetworkOffering.class, network.getNetworkOfferingId());
                         if (networkOffering.isSystemOnly()) {
                             InvalidParameterValueException ex = new InvalidParameterValueException(
                                     "Specified Network id is system only and can't be used for vm deployment");
@@ -4641,7 +4650,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                                 s_logger.debug("Implementing the network for account" + newNetwork + " as a part of" +
                                         " network provision for persistent networks");
                                 try {
-                                    Pair<NetworkGuru, NetworkVO> implementedNetwork = _networkMgr.implementNetwork(newNetwork.getId(), dest, context);
+                                    Pair<? extends NetworkGuru, ? extends Network> implementedNetwork = _networkMgr.implementNetwork(newNetwork.getId(), dest, context);
                                     if (implementedNetwork.first() == null) {
                                         s_logger.warn("Failed to implement the network " + newNetwork);
                                     }
@@ -4676,7 +4685,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                 }
 
                 // add the new nics
-                List<Pair<NetworkVO, NicProfile>> networks = new ArrayList<Pair<NetworkVO, NicProfile>>();
+                LinkedHashMap<Network, NicProfile> networks = new LinkedHashMap<Network, NicProfile>();
                 int toggle = 0;
                 for (NetworkVO appNet : applicableNetworks) {
                     NicProfile defaultNic = new NicProfile();
@@ -4684,8 +4693,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
                         defaultNic.setDefaultNic(true);
                         toggle++;
                     }
-                    networks.add(new Pair<NetworkVO, NicProfile>(appNet,
-                            defaultNic));
+                    networks.put(appNet, defaultNic);
                 }
                 VirtualMachine vmi = _itMgr.findById(vm.getId());
                 VirtualMachineProfileImpl vmProfile = new VirtualMachineProfileImpl(vmi);
@@ -4810,7 +4818,7 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
         }
 
         /* If new template/ISO is provided allocate a new volume from new template/ISO otherwise allocate new volume from original template/ISO */
-        VolumeVO newVol = null;
+        Volume newVol = null;
         if (newTemplateId != null) {
             if (isISO) {
                 newVol = volumeMgr.allocateDuplicateVolume(root, null);
@@ -4826,6 +4834,10 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
             }
         } else {
             newVol = volumeMgr.allocateDuplicateVolume(root, null);
+        }
+        // Save usage event and update resource count for user vm volumes
+        if (vm instanceof UserVm) {
+            _resourceLimitMgr.incrementResourceCount(vm.getAccountId(), ResourceType.volume);
         }
 
         _volsDao.attachVolume(newVol.getId(), vmId, newVol.getDeviceId());

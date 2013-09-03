@@ -20,6 +20,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -30,11 +31,10 @@ import javax.ejb.Local;
 import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
-import org.apache.log4j.Logger;
-import org.springframework.stereotype.Component;
-
 import com.google.gson.Gson;
 
+import org.apache.log4j.Logger;
+import org.springframework.stereotype.Component;
 import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.command.admin.cluster.AddClusterCmd;
 import org.apache.cloudstack.api.command.admin.cluster.DeleteClusterCmd;
@@ -46,6 +46,7 @@ import org.apache.cloudstack.api.command.admin.host.ReconnectHostCmd;
 import org.apache.cloudstack.api.command.admin.host.UpdateHostCmd;
 import org.apache.cloudstack.api.command.admin.host.UpdateHostPasswordCmd;
 import org.apache.cloudstack.context.CallContext;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.region.dao.RegionDao;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
@@ -75,10 +76,10 @@ import com.cloud.capacity.dao.CapacityDao;
 import com.cloud.cluster.ClusterManager;
 import com.cloud.configuration.Config;
 import com.cloud.configuration.ConfigurationManager;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.ClusterDetailsDao;
 import com.cloud.dc.ClusterDetailsVO;
 import com.cloud.dc.ClusterVO;
+import com.cloud.dc.DataCenter;
 import com.cloud.dc.DataCenter.NetworkType;
 import com.cloud.dc.DataCenterIpAddressVO;
 import com.cloud.dc.DataCenterVO;
@@ -118,12 +119,12 @@ import com.cloud.hypervisor.Hypervisor.HypervisorType;
 import com.cloud.hypervisor.kvm.discoverer.KvmDummyResourceBase;
 import com.cloud.network.dao.IPAddressDao;
 import com.cloud.network.dao.IPAddressVO;
+import com.cloud.offering.ServiceOffering;
 import com.cloud.org.Cluster;
 import com.cloud.org.Grouping;
 import com.cloud.org.Grouping.AllocationState;
 import com.cloud.org.Managed;
 import com.cloud.serializer.GsonHelper;
-import com.cloud.service.ServiceOfferingVO;
 import com.cloud.storage.GuestOSCategoryVO;
 import com.cloud.storage.StorageManager;
 import com.cloud.storage.StoragePool;
@@ -145,9 +146,11 @@ import com.cloud.utils.UriUtils;
 import com.cloud.utils.component.Manager;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.db.DB;
+import com.cloud.utils.db.GenericSearchBuilder;
 import com.cloud.utils.db.GlobalLock;
 import com.cloud.utils.db.SearchBuilder;
 import com.cloud.utils.db.SearchCriteria;
+import com.cloud.utils.db.SearchCriteria.Func;
 import com.cloud.utils.db.SearchCriteria.Op;
 import com.cloud.utils.db.SearchCriteria2;
 import com.cloud.utils.db.SearchCriteriaService;
@@ -259,6 +262,8 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
     private HypervisorType _defaultSystemVMHypervisor;
 
     private static final int ACQUIRE_GLOBAL_LOCK_TIMEOUT_FOR_COOPERATION = 30; // seconds
+
+    private GenericSearchBuilder<HostVO, String> _hypervisorsInDC;
 
     private void insertListener(Integer event, ResourceListener listener) {
         List<ResourceListener> lst = _lifeCycleListeners.get(event);
@@ -873,6 +878,15 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
         // Delete the associated entries in host ref table
         _storagePoolHostDao.deletePrimaryRecordsForHost(hostId);
 
+        // Make sure any VMs that were marked as being on this host are cleaned up
+        List<VMInstanceVO> vms = _vmDao.listByHostId(hostId);
+        for (VMInstanceVO vm : vms) {
+            // this is how VirtualMachineManagerImpl does it when it syncs VM states
+            vm.setState(State.Stopped);
+            vm.setHostId(null);
+            _vmDao.persist(vm);
+        }
+
         // For pool ids you got, delete local storage host entries in pool table
         // where
         for (StoragePoolHostVO pool : pools) {
@@ -1327,6 +1341,15 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
     public boolean configure(String name, Map<String, Object> params) throws ConfigurationException {
         _defaultSystemVMHypervisor = HypervisorType.getType(_configDao.getValue(Config.SystemVMDefaultHypervisor.toString()));
         _gson = GsonHelper.getGson();
+
+        _hypervisorsInDC = _hostDao.createSearchBuilder(String.class);
+        _hypervisorsInDC.select(null, Func.DISTINCT, _hypervisorsInDC.entity().getHypervisorType());
+        _hypervisorsInDC.and("hypervisorType", _hypervisorsInDC.entity().getHypervisorType(), SearchCriteria.Op.NNULL);
+        _hypervisorsInDC.and("dataCenter", _hypervisorsInDC.entity().getDataCenterId(), SearchCriteria.Op.EQ);
+        _hypervisorsInDC.and("id", _hypervisorsInDC.entity().getId(), SearchCriteria.Op.NEQ);
+        _hypervisorsInDC.and("type", _hypervisorsInDC.entity().getType(), SearchCriteria.Op.EQ);
+        _hypervisorsInDC.done();
+
         return true;
     }
 
@@ -1397,6 +1420,7 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
         if (defaultHype == HypervisorType.None) {
             List<HypervisorType> supportedHypes = getSupportedHypervisorTypes(zoneId, false, null);
             if (supportedHypes.size() > 0) {
+                Collections.shuffle(supportedHypes);
                 defaultHype = supportedHypes.get(0);
             }
         }
@@ -2406,23 +2430,25 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
 
     @Override
     public List<HypervisorType> listAvailHypervisorInZone(Long hostId, Long zoneId) {
-        SearchCriteriaService<HostVO, HostVO> sc = SearchCriteria2.create(HostVO.class);
+        SearchCriteria<String> sc = _hypervisorsInDC.create();
         if (zoneId != null) {
-            sc.addAnd(sc.getEntity().getDataCenterId(), Op.EQ, zoneId);
+            sc.setParameters("dataCenter", zoneId);
         }
         if (hostId != null) {
             // exclude the given host, since we want to check what hypervisor is already handled
             // in adding this new host
-            sc.addAnd(sc.getEntity().getId(), Op.NEQ, hostId);
+            sc.setParameters("id", hostId);
         }
-        sc.addAnd(sc.getEntity().getType(), Op.EQ, Host.Type.Routing);
-        List<HostVO> hosts = sc.list();
+        sc.setParameters("type", Host.Type.Routing);
 
-        List<HypervisorType> hypers = new ArrayList<HypervisorType>(5);
-        for (HostVO host : hosts) {
-            hypers.add(host.getHypervisorType());
+        // The search is not able to return list of enums, so getting
+        // list of hypervisors as strings and then converting them to enum
+        List<String> hvs = _hostDao.customSearch(sc, null);
+        List<HypervisorType> hypervisors = new ArrayList<HypervisorType>();
+        for (String hv : hvs) {
+            hypervisors.add(HypervisorType.getType(hv));
         }
-        return hypers;
+        return hypervisors;
     }
 
     @Override
@@ -2447,7 +2473,7 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
     }
 
     @Override
-    public Pair<Pod, Long> findPod(VirtualMachineTemplate template, ServiceOfferingVO offering, DataCenterVO dc, long accountId,
+    public Pair<Pod, Long> findPod(VirtualMachineTemplate template, ServiceOffering offering, DataCenter dc, long accountId,
             Set<Long> avoids) {
         for (PodAllocator allocator : _podAllocators) {
             final Pair<Pod, Long> pod = allocator.allocateTo(template, offering, dc, accountId, avoids);

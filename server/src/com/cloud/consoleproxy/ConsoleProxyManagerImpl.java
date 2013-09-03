@@ -17,10 +17,10 @@
 package com.cloud.consoleproxy;
 
 import java.nio.charset.Charset;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +34,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 import org.apache.cloudstack.context.CallContext;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
 import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreDao;
@@ -45,7 +46,6 @@ import com.cloud.agent.api.ConsoleProxyLoadReportCommand;
 import com.cloud.agent.api.RebootCommand;
 import com.cloud.agent.api.StartupCommand;
 import com.cloud.agent.api.StartupProxyCommand;
-import com.cloud.agent.api.StopAnswer;
 import com.cloud.agent.api.check.CheckSshAnswer;
 import com.cloud.agent.api.check.CheckSshCommand;
 import com.cloud.agent.api.proxy.ConsoleProxyLoadAnswer;
@@ -54,7 +54,6 @@ import com.cloud.certificate.dao.CertificateDao;
 import com.cloud.cluster.ClusterManager;
 import com.cloud.configuration.Config;
 import com.cloud.configuration.ZoneConfig;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.DataCenter;
 import com.cloud.dc.DataCenter.NetworkType;
 import com.cloud.dc.DataCenterVO;
@@ -83,6 +82,7 @@ import com.cloud.info.RunningHostInfoAgregator.ZoneHostInfo;
 import com.cloud.keystore.KeystoreDao;
 import com.cloud.keystore.KeystoreManager;
 import com.cloud.keystore.KeystoreVO;
+import com.cloud.network.Network;
 import com.cloud.network.NetworkManager;
 import com.cloud.network.NetworkModel;
 import com.cloud.network.Networks.TrafficType;
@@ -155,7 +155,7 @@ import com.cloud.vm.dao.VMInstanceDao;
 //
 @Local(value = { ConsoleProxyManager.class, ConsoleProxyService.class })
 public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxyManager,
-        VirtualMachineGuru, SystemVmLoadScanHandler<Long>, ResourceStateAdapter {
+VirtualMachineGuru, SystemVmLoadScanHandler<Long>, ResourceStateAdapter {
     private static final Logger s_logger = Logger.getLogger(ConsoleProxyManagerImpl.class);
 
     private static final int DEFAULT_CAPACITY_SCAN_INTERVAL = 30000; // 30 seconds
@@ -558,7 +558,7 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
 
             // For VMs that are in Stopping, Starting, Migrating state, let client to wait by returning null
             // as sooner or later, Starting/Migrating state will be transited to Running and Stopping will be transited
-// to
+            // to
             // Stopped to allow
             // Starting of it
             s_logger.warn("Console proxy is not in correct state to be started: " + proxy.getState());
@@ -656,9 +656,15 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
             s_logger.warn("The number of launched console proxy on zone " + dataCenterId + " has reached to limit");
             return null;
         }
-        HypervisorType defaultHype = _resourceMgr.getAvailableHypervisor(dataCenterId);
 
-        Map<String, Object> context = createProxyInstance(dataCenterId, defaultHype);
+        VMTemplateVO template = null;
+        HypervisorType availableHypervisor = _resourceMgr.getAvailableHypervisor(dataCenterId);
+        template = _templateDao.findSystemVMReadyTemplate(dataCenterId, availableHypervisor);
+        if (template == null) {
+            throw new CloudRuntimeException("Not able to find the System templates or not downloaded in zone " + dataCenterId);
+        }
+
+        Map<String, Object> context = createProxyInstance(dataCenterId, template);
 
         long proxyVmId = (Long) context.get("proxyVmId");
         if (proxyVmId == 0) {
@@ -684,7 +690,7 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
         return null;
     }
 
-    protected Map<String, Object> createProxyInstance(long dataCenterId, HypervisorType desiredHyp) throws ConcurrentOperationException {
+    protected Map<String, Object> createProxyInstance(long dataCenterId, VMTemplateVO template) throws ConcurrentOperationException {
 
         long id = _consoleProxyDao.getNextInSequence(Long.class, "id");
         String name = VirtualMachineName.getConsoleProxyName(id, _instance);
@@ -701,36 +707,30 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
             }
             defaultNetwork = networks.get(0);
         } else {
-        TrafficType defaultTrafficType = TrafficType.Public;
-        if (dc.getNetworkType() == NetworkType.Basic || dc.isSecurityGroupEnabled()) {
-            defaultTrafficType = TrafficType.Guest;
-        }
-        List<NetworkVO> defaultNetworks = _networkDao.listByZoneAndTrafficType(dataCenterId, defaultTrafficType);
+            TrafficType defaultTrafficType = TrafficType.Public;
+            if (dc.getNetworkType() == NetworkType.Basic || dc.isSecurityGroupEnabled()) {
+                defaultTrafficType = TrafficType.Guest;
+            }
+            List<NetworkVO> defaultNetworks = _networkDao.listByZoneAndTrafficType(dataCenterId, defaultTrafficType);
 
             // api should never allow this situation to happen
-        if (defaultNetworks.size() != 1) {
+            if (defaultNetworks.size() != 1) {
                 throw new CloudRuntimeException("Found " + defaultNetworks.size() + " networks of type "
-                      + defaultTrafficType + " when expect to find 1");
+                        + defaultTrafficType + " when expect to find 1");
             }
-             defaultNetwork = defaultNetworks.get(0);
+            defaultNetwork = defaultNetworks.get(0);
         }
 
         List<? extends NetworkOffering> offerings = _networkModel.getSystemAccountNetworkOfferings(NetworkOffering.SystemControlNetwork, NetworkOffering.SystemManagementNetwork);
-        List<Pair<NetworkVO, NicProfile>> networks = new ArrayList<Pair<NetworkVO, NicProfile>>(offerings.size() + 1);
+        LinkedHashMap<Network, NicProfile> networks = new LinkedHashMap<Network, NicProfile>(offerings.size() + 1);
         NicProfile defaultNic = new NicProfile();
         defaultNic.setDefaultNic(true);
         defaultNic.setDeviceId(2);
 
-        networks.add(new Pair<NetworkVO, NicProfile>(_networkMgr.setupNetwork(systemAcct, _networkOfferingDao.findById(defaultNetwork.getNetworkOfferingId()), plan, null, null, false).get(0), defaultNic));
+        networks.put(_networkMgr.setupNetwork(systemAcct, _networkOfferingDao.findById(defaultNetwork.getNetworkOfferingId()), plan, null, null, false).get(0), defaultNic);
 
         for (NetworkOffering offering : offerings) {
-            networks.add(new Pair<NetworkVO, NicProfile>(_networkMgr.setupNetwork(systemAcct, offering, plan, null, null, false).get(0), null));
-        }
-
-        VMTemplateVO template = _templateDao.findSystemVMTemplate(dataCenterId, desiredHyp);
-        if (template == null) {
-            s_logger.debug("Can't find a template to start");
-            throw new CloudRuntimeException("Insufficient capacity exception");
+            networks.put(_networkMgr.setupNetwork(systemAcct, offering, plan, null, null, false).get(0), null);
         }
 
         ConsoleProxyVO proxy = new ConsoleProxyVO(id, _serviceOffering.getId(), name, template.getId(), template.getHypervisorType(), template.getGuestOSId(), dataCenterId, systemAcct.getDomainId(),
@@ -950,7 +950,13 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
     public boolean isZoneReady(Map<Long, ZoneHostInfo> zoneHostInfoMap, long dataCenterId) {
         ZoneHostInfo zoneHostInfo = zoneHostInfoMap.get(dataCenterId);
         if (zoneHostInfo != null && isZoneHostReady(zoneHostInfo)) {
-            VMTemplateVO template = _templateDao.findSystemVMTemplate(dataCenterId);
+            VMTemplateVO template = _templateDao.findSystemVMReadyTemplate(dataCenterId, HypervisorType.Any);
+            if (template == null) {
+                if (s_logger.isDebugEnabled()) {
+                    s_logger.debug("System vm template is not ready at data center " + dataCenterId + ", wait until it is ready to launch console proxy vm");
+                }
+                return false;
+            }
             TemplateDataStoreVO templateHostRef = _vmTemplateStoreDao.findByTemplateZoneDownloadStatus(template.getId(), dataCenterId,
                     Status.DOWNLOADED);
 
@@ -1282,8 +1288,9 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
         String cpvmSrvcOffIdStr = configs.get(Config.ConsoleProxyServiceOffering.key());
         if (cpvmSrvcOffIdStr != null) {
             DiskOffering diskOffering = _diskOfferingDao.findByUuid(cpvmSrvcOffIdStr);
-            if (diskOffering == null)
+            if (diskOffering == null) {
                 diskOffering = _diskOfferingDao.findById(Long.parseLong(cpvmSrvcOffIdStr));
+            }
             if (diskOffering != null) {
                 _serviceOffering = _offeringDao.findById(diskOffering.getId());
             } else {
@@ -1496,7 +1503,7 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
     }
 
     @Override
-    public void finalizeStop(VirtualMachineProfile profile, StopAnswer answer) {
+    public void finalizeStop(VirtualMachineProfile profile, Answer answer) {
         //release elastic IP here if assigned
         IPAddressVO ip = _ipAddressDao.findByAssociatedVmId(profile.getId());
         if (ip != null && ip.getSystem()) {
@@ -1517,7 +1524,7 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
     @Override
     public void onScanStart() {
         // to reduce possible number of DB queries for capacity scan, we run following aggregated queries in preparation
-// stage
+        // stage
         _zoneHostInfoMap = getZoneHostInfo();
 
         _zoneProxyCountMap = new HashMap<Long, ConsoleProxyLoadInfo>();

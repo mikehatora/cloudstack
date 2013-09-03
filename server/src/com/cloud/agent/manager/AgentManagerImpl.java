@@ -40,11 +40,12 @@ import javax.naming.ConfigurationException;
 
 import org.apache.log4j.Logger;
 
-import org.apache.cloudstack.config.ConfigDepot;
-import org.apache.cloudstack.config.ConfigKey;
-import org.apache.cloudstack.config.ConfigValue;
-import org.apache.cloudstack.config.Configurable;
 import org.apache.cloudstack.context.ServerContexts;
+import org.apache.cloudstack.framework.config.ConfigDepot;
+import org.apache.cloudstack.framework.config.ConfigKey;
+import org.apache.cloudstack.framework.config.ConfigValue;
+import org.apache.cloudstack.framework.config.Configurable;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.utils.identity.ManagementServerNode;
 
 import com.cloud.agent.AgentManager;
@@ -72,7 +73,6 @@ import com.cloud.agent.transport.Request;
 import com.cloud.agent.transport.Response;
 import com.cloud.alert.AlertManager;
 import com.cloud.configuration.Config;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.ClusterVO;
 import com.cloud.dc.DataCenterVO;
 import com.cloud.dc.HostPodVO;
@@ -97,7 +97,6 @@ import com.cloud.resource.ResourceManager;
 import com.cloud.resource.ResourceState;
 import com.cloud.resource.ServerResource;
 import com.cloud.storage.resource.DummySecondaryStorageResource;
-import com.cloud.utils.NumbersUtil;
 import com.cloud.utils.Pair;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.concurrency.NamedThreadFactory;
@@ -148,7 +147,6 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
     protected ConfigurationDao _configDao = null;
     @Inject
     protected ClusterDao _clusterDao = null;
-    protected int _port;
 
     @Inject
     protected HighAvailabilityManager _haMgr = null;
@@ -180,26 +178,29 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
     @Inject
     protected ConfigDepot _configDepot;
 
-    protected final ConfigKey<Integer> Workers = new ConfigKey<Integer>(Integer.class, "workers", "Advance", AgentManager.class, "5",
-            "Number of worker threads handling remote agent connections.", false, "5-Max Thread Limit");
-    protected final ConfigKey<Integer> Port = new ConfigKey<Integer>(Integer.class, "port", "Advance", AgentManager.class, "8250", "Port to listen on for remote agent connections.", false, "Usable port range");
-    protected final ConfigKey<Integer> PingInterval = new ConfigKey<Integer>(Integer.class, "ping.interval", "Advance", AgentManager.class, "60", "Interval to send application level pings to make sure the connection is still working", false, "Seconds");
-    protected final ConfigKey<Float> PingTimeout = new ConfigKey<Float>(Float.class, "ping.timeout", "Advance", AgentManager.class, "2.5", "Multiplier to ping.interval before announcing an agent has timed out", true, null);
-    protected final ConfigKey<Integer> Wait = new ConfigKey<Integer>(Integer.class, "wait", "Advance", AgentManager.class, "1800",
-            "Time in seconds to wait for control commands to return", true, "Seconds");
-    protected final ConfigKey<Integer> AlertWait = new ConfigKey<Integer>(Integer.class, "alert.wait", "Advance", AgentManager.class, "1800",
-            "Seconds to wait before alerting on a disconnected agent", true, "Seconds");
-    protected final ConfigKey<Integer> DirectAgentLoadSize = new ConfigKey<Integer>(Integer.class, "direct.agent.load.size", "Advance", AgentManager.class, "16",
-            "The number of direct agents to load each time", false, null);
-    protected final ConfigKey<Integer> DirectAgentPoolSize = new ConfigKey<Integer>(Integer.class, "direct.agent.pool.size", "Advance", AgentManager.class, "500",
-            "Default size for DirectAgentPool", false, null);
+    protected final ConfigKey<Integer> Workers = new ConfigKey<Integer>(Integer.class, "workers", "Advance", "5",
+            "Number of worker threads handling remote agent connections.", false);
+    protected final ConfigKey<Integer> Port = new ConfigKey<Integer>(Integer.class, "port", "Advance", "8250", "Port to listen on for remote agent connections.", false);
+    protected final ConfigKey<Integer> PingInterval = new ConfigKey<Integer>(Integer.class, "ping.interval", "Advance", "60",
+            "Interval to send application level pings to make sure the connection is still working", false);
+    protected final ConfigKey<Float> PingTimeout = new ConfigKey<Float>(Float.class, "ping.timeout", "Advance", "2.5",
+            "Multiplier to ping.interval before announcing an agent has timed out", true);
+    protected final ConfigKey<Integer> Wait = new ConfigKey<Integer>(Integer.class, "wait", "Advance", "1800",
+            "Time in seconds to wait for control commands to return", true);
+    protected final ConfigKey<Integer> AlertWait = new ConfigKey<Integer>(Integer.class, "alert.wait", "Advance", "1800",
+            "Seconds to wait before alerting on a disconnected agent", true);
+    protected final ConfigKey<Integer> DirectAgentLoadSize = new ConfigKey<Integer>(Integer.class, "direct.agent.load.size", "Advance", "16",
+            "The number of direct agents to load each time", false);
+    protected final ConfigKey<Integer> DirectAgentPoolSize = new ConfigKey<Integer>(Integer.class, "direct.agent.pool.size", "Advance", "500",
+            "Default size for DirectAgentPool", false);
+
+    protected ConfigValue<Integer> _port;
 
     @Override
     public boolean configure(final String name, final Map<String, Object> params) throws ConfigurationException {
 
-        final Map<String, String> configs = _configDao.getConfiguration("AgentManager", params);
-        _port = NumbersUtil.parseInt(configs.get("port"), 8250);
-        final int workers = NumbersUtil.parseInt(configs.get("workers"), 5);
+        _port = _configDepot.get(Port);
+        ConfigValue<Integer> workers = _configDepot.get(Workers);
 
         _pingInterval = _configDepot.get(PingInterval);
 
@@ -225,8 +226,8 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
         //allow core threads to time out even when there are no items in the queue
         _connectExecutor.allowCoreThreadTimeOut(true);
 
-        _connection = new NioServer("AgentManager", _port, workers + 10, this);
-        s_logger.info("Listening on " + _port + " with " + workers + " workers");
+        _connection = new NioServer("AgentManager", _port.value(), workers.value() + 10, this);
+        s_logger.info("Listening on " + _port.value() + " with " + workers.value() + " workers");
 
         
         ConfigValue<Integer> size = _configDepot.get(DirectAgentPoolSize);
@@ -365,7 +366,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
 
     @Override
     public Answer send(Long hostId, Command cmd) throws AgentUnavailableException, OperationTimedoutException {
-        Commands cmds = new Commands(OnError.Stop);
+        Commands cmds = new Commands(Command.OnError.Stop);
         cmds.addCommand(cmd);
         send(hostId, cmds, cmd.getWait());
         Answer[] answers = cmds.getAnswers();
@@ -521,19 +522,19 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
                         ConnectionException ce = (ConnectionException)e;
                         if (ce.isSetupError()) {
                             s_logger.warn("Monitor " + monitor.second().getClass().getSimpleName() + " says there is an error in the connect process for " + hostId + " due to " + e.getMessage());
-                            handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true);
+                            handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true, true);
                             throw ce;
                         } else {
                             s_logger.info("Monitor " + monitor.second().getClass().getSimpleName() + " says not to continue the connect process for " + hostId + " due to " + e.getMessage());
-                            handleDisconnectWithoutInvestigation(attache, Event.ShutdownRequested, true);
+                            handleDisconnectWithoutInvestigation(attache, Event.ShutdownRequested, true, true);
                             return attache;
                         }
                     } else if (e instanceof HypervisorVersionChangedException) {
-                        handleDisconnectWithoutInvestigation(attache, Event.ShutdownRequested, true);
+                        handleDisconnectWithoutInvestigation(attache, Event.ShutdownRequested, true, true);
                         throw new CloudRuntimeException("Unable to connect " + attache.getId(), e);
                     } else {
                         s_logger.error("Monitor " + monitor.second().getClass().getSimpleName() + " says there is an error in the connect process for " + hostId + " due to " + e.getMessage(), e);
-                        handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true);
+                        handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true, true);
                         throw new CloudRuntimeException("Unable to connect " + attache.getId(), e);
                     }
                 }
@@ -547,7 +548,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
             // this is tricky part for secondary storage
             // make it as disconnected, wait for secondary storage VM to be up
             // return the attache instead of null, even it is disconnectede
-            handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true);
+            handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true, true);
         }
 
         agentStatusTransitTo(host, Event.Ready, _nodeId);
@@ -744,7 +745,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
         return true;
     }
 
-    protected boolean handleDisconnectWithoutInvestigation(AgentAttache attache, Status.Event event, boolean transitState) {
+    protected boolean handleDisconnectWithoutInvestigation(AgentAttache attache, Status.Event event, boolean transitState, boolean removeAgent) {
         long hostId = attache.getId();
 
         s_logger.info("Host " + hostId + " is disconnecting with event " + event);
@@ -779,9 +780,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
             s_logger.debug("Deregistering link for " + hostId + " with state " + nextStatus);
         }
 
-        //remove the attache
         removeAgent(attache, nextStatus);
-
         //update the DB
         if (host != null && transitState) {
             disconnectAgent(host, event, _nodeId);
@@ -859,7 +858,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
             }
         }
 
-        handleDisconnectWithoutInvestigation(attache, event, true);
+        handleDisconnectWithoutInvestigation(attache, event, true, true);
         host = _hostDao.findById(host.getId());
         if (host.getStatus() == Status.Alert || host.getStatus() == Status.Down) {
             _haMgr.scheduleRestartForVmsOnHost(host, true);
@@ -885,7 +884,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
                 if (_investigate == true) {
                     handleDisconnectWithInvestigation(_attache, _event);
                 } else {
-                    handleDisconnectWithoutInvestigation(_attache, _event, true);
+                    handleDisconnectWithoutInvestigation(_attache, _event, true, false);
                 }
             } catch (final Exception e) {
                 s_logger.error("Exception caught while handling disconnect: ", e);
@@ -979,7 +978,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
             AgentAttache attache = null;
             attache = findAttache(hostId);
             if (attache != null) {
-                handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true);
+                handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, true, true);
             }
             return true;
         } else if (event == Event.ShutdownRequested) {
@@ -1576,6 +1575,11 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
             return -1;
         }
 
+    }
+
+    @Override
+    public String getConfigComponentName() {
+        return AgentManager.class.getSimpleName();
     }
 
     @Override

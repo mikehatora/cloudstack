@@ -23,6 +23,7 @@ import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,9 +48,10 @@ import org.apache.log4j.Logger;
 
 import com.google.gson.Gson;
 
-import org.apache.cloudstack.config.ConfigDepot;
-import org.apache.cloudstack.config.ConfigKey;
-import org.apache.cloudstack.config.ConfigValue;
+import org.apache.cloudstack.framework.config.ConfigDepot;
+import org.apache.cloudstack.framework.config.ConfigKey;
+import org.apache.cloudstack.framework.config.ConfigValue;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.utils.identity.ManagementServerNode;
 
 import com.cloud.agent.AgentManager;
@@ -76,14 +78,12 @@ import com.cloud.cluster.agentlb.HostTransferMapVO;
 import com.cloud.cluster.agentlb.HostTransferMapVO.HostTransferState;
 import com.cloud.cluster.agentlb.dao.HostTransferMapDao;
 import com.cloud.cluster.dao.ManagementServerHostDao;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.exception.AgentUnavailableException;
 import com.cloud.exception.OperationTimedoutException;
 import com.cloud.host.Host;
 import com.cloud.host.HostVO;
 import com.cloud.host.Status;
 import com.cloud.host.Status.Event;
-import com.cloud.resource.ResourceState;
 import com.cloud.resource.ServerResource;
 import com.cloud.serializer.GsonHelper;
 import com.cloud.storage.resource.DummySecondaryStorageResource;
@@ -134,14 +134,14 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
         super();
     }
 
-    protected final ConfigKey<Boolean> EnableLB = new ConfigKey<Boolean>(Boolean.class, "agent.lb.enabled", "Advanced", AgentManager.class, "false",
-            "Enable agent load balancing between management server nodes", true, "True/False");
-    protected final ConfigKey<Double> ConnectedAgentThreshold = new ConfigKey<Double>(Double.class, "agent.load.threshold", "Advanced", AgentManager.class, "0.7",
-            "What percentage of the agents can be held by one management server before load balancing happens", true, "0-1");
-    protected final ConfigKey<Integer> LoadSize = new ConfigKey<Integer>(Integer.class, "direct.agent.load.size", "Advanced", AgentManager.class, "16",
-            "How many agents to connect to in each round", true, "");
-    protected final ConfigKey<Integer> ScanInterval = new ConfigKey<Integer>(Integer.class, "direct.agent.scan.interval", "Advanced", AgentManager.class, "90",
-            "Interval between scans to load agents", false, "Seconds");
+    protected final ConfigKey<Boolean> EnableLB = new ConfigKey<Boolean>(Boolean.class, "agent.lb.enabled", "Advanced", "false",
+            "Enable agent load balancing between management server nodes", true);
+    protected final ConfigKey<Double> ConnectedAgentThreshold = new ConfigKey<Double>(Double.class, "agent.load.threshold", "Advanced", "0.7",
+            "What percentage of the agents can be held by one management server before load balancing happens", true);
+    protected final ConfigKey<Integer> LoadSize = new ConfigKey<Integer>(Integer.class, "direct.agent.load.size", "Advanced", "16",
+            "How many agents to connect to in each round", true);
+    protected final ConfigKey<Integer> ScanInterval = new ConfigKey<Integer>(Integer.class, "direct.agent.scan.interval", "Advanced", "90",
+            "Interval between scans to load agents", false);
     
 
     protected ConfigValue<Boolean> _agentLBEnabled;
@@ -310,19 +310,19 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
     }
 
     @Override
-    protected boolean handleDisconnectWithoutInvestigation(AgentAttache attache, Status.Event event, boolean transitState) {
-        return handleDisconnect(attache, event, false, true);
+    protected boolean handleDisconnectWithoutInvestigation(AgentAttache attache, Status.Event event, boolean transitState, boolean removeAgent) {
+        return handleDisconnect(attache, event, false, true, removeAgent);
     }
 
     @Override
     protected boolean handleDisconnectWithInvestigation(AgentAttache attache, Status.Event event) {
-        return handleDisconnect(attache, event, true, true);
+        return handleDisconnect(attache, event, true, true, true);
     }
 
-    protected boolean handleDisconnect(AgentAttache agent, Status.Event event, boolean investigate, boolean broadcast) {
+    protected boolean handleDisconnect(AgentAttache agent, Status.Event event, boolean investigate, boolean broadcast, boolean removeAgent) {
         boolean res;
         if (!investigate) {
-            res = super.handleDisconnectWithoutInvestigation(agent, event, true);
+            res = super.handleDisconnectWithoutInvestigation(agent, event, true, removeAgent);
         } else {
             res = super.handleDisconnectWithInvestigation(agent, event);
         }
@@ -365,7 +365,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
                     return true;
                 }
 
-                return super.handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, false);
+                return super.handleDisconnectWithoutInvestigation(attache, Event.AgentDisconnected, false, true);
             }
 
             return true;
@@ -508,13 +508,13 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
                     throw new CloudRuntimeException("Unable to resolve " + ip);
                 }
                 try {
-                    ch = SocketChannel.open(new InetSocketAddress(addr, _port));
+                    ch = SocketChannel.open(new InetSocketAddress(addr, _port.value()));
                     ch.configureBlocking(true); // make sure we are working at blocking mode
                     ch.socket().setKeepAlive(true);
                     ch.socket().setSoTimeout(60 * 1000);
                     try {
                         SSLContext sslContext = Link.initSSLContext(true);
-                        sslEngine = sslContext.createSSLEngine(ip, _port);
+                        sslEngine = sslContext.createSSLEngine(ip, _port.value());
                         sslEngine.setUseClientMode(true);
 
                         Link.doHandshake(ch, sslEngine, true);
@@ -878,7 +878,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
 
     private Answer[] sendRebalanceCommand(long peer, long agentId, long currentOwnerId, long futureOwnerId, Event event) {
         TransferAgentCommand transfer = new TransferAgentCommand(agentId, currentOwnerId, futureOwnerId, event);
-        Commands commands = new Commands(OnError.Stop);
+        Commands commands = new Commands(Command.OnError.Stop);
         commands.addCommand(transfer);
 
         Command[] cmds = commands.toCommands();
@@ -1058,7 +1058,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
 
                 AgentAttache attache = findAttache(hostId);
                 if (attache != null) {
-                    result = handleDisconnect(attache, Event.AgentDisconnected, false, false);
+                    result = handleDisconnect(attache, Event.AgentDisconnected, false, false, true);
                 }
 
                 if (result) {
@@ -1134,7 +1134,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
         try {
             s_logger.debug("Management server " + _nodeId + " failed to rebalance agent " + hostId);
             _hostTransferDao.completeAgentTransfer(hostId);
-            handleDisconnectWithoutInvestigation(findAttache(hostId), Event.RebalanceFailed, true);
+            handleDisconnectWithoutInvestigation(findAttache(hostId), Event.RebalanceFailed, true, true);
         } catch (Exception ex) {
             s_logger.warn("Failed to reconnect host id=" + hostId + " as a part of failed rebalance task cleanup");
         }
@@ -1151,7 +1151,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
         synchronized (_agents) {
             ClusteredDirectAgentAttache attache = (ClusteredDirectAgentAttache)_agents.get(hostId);
             if (attache != null && attache.getQueueSize() == 0 && attache.getNonRecurringListenersSize() == 0) {
-            	handleDisconnectWithoutInvestigation(attache, Event.StartAgentRebalance, true);
+            	handleDisconnectWithoutInvestigation(attache, Event.StartAgentRebalance, true, true);
                 ClusteredAgentAttache forwardAttache = (ClusteredAgentAttache)createAttache(hostId);
                 if (forwardAttache == null) {
                     s_logger.warn("Unable to create a forward attache for the host " + hostId + " as a part of rebalance process");
@@ -1233,17 +1233,13 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
     }
 
     public Answer[] sendToAgent(Long hostId, Command[] cmds, boolean stopOnError) throws AgentUnavailableException, OperationTimedoutException {
-        Commands commands = new Commands(stopOnError ? OnError.Stop : OnError.Continue);
+        Commands commands = new Commands(stopOnError ? Command.OnError.Stop : Command.OnError.Continue);
         for (Command cmd : cmds) {
             commands.addCommand(cmd);
         }
         return send(hostId, commands);
     }
 
-
-    public boolean executeResourceUserRequest(long hostId, ResourceState.Event event) throws AgentUnavailableException {
-        return _resourceMgr.executeUserRequest(hostId, event);
-    }
 
     protected class ClusterDispatcher implements ClusterManager.Dispatcher {
         @Override
@@ -1317,7 +1313,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
 
                 boolean result = false;
                 try {
-                    result = executeResourceUserRequest(cmd.getHostId(), cmd.getEvent());
+                    result = _resourceMgr.executeUserRequest(cmd.getHostId(), cmd.getEvent());
                     s_logger.debug("Result is " + result);
                 } catch (AgentUnavailableException ex) {
                     s_logger.warn("Agent is unavailable", ex);
@@ -1408,5 +1404,18 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
             }
         }
         profilerAgentLB.stop();
+    }
+    
+    @Override
+    public ConfigKey<?>[] getConfigKeys() {
+        ConfigKey<?>[] keys = super.getConfigKeys();
+        
+        List<ConfigKey<?>> keysLst = new ArrayList<ConfigKey<?>>();
+        keysLst.addAll(Arrays.asList(keys));
+        keysLst.add(EnableLB);
+        keysLst.add(ConnectedAgentThreshold);
+        keysLst.add(LoadSize);
+        keysLst.add(ScanInterval);
+        return keysLst.toArray(new ConfigKey<?>[keysLst.size()]);
     }
 }

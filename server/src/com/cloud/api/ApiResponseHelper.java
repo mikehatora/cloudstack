@@ -81,7 +81,6 @@ import org.apache.cloudstack.api.response.LBHealthCheckPolicyResponse;
 import org.apache.cloudstack.api.response.LBHealthCheckResponse;
 import org.apache.cloudstack.api.response.LBStickinessPolicyResponse;
 import org.apache.cloudstack.api.response.LBStickinessResponse;
-import org.apache.cloudstack.api.response.LDAPConfigResponse;
 import org.apache.cloudstack.api.response.LoadBalancerResponse;
 import org.apache.cloudstack.api.response.NetworkACLItemResponse;
 import org.apache.cloudstack.api.response.NetworkACLResponse;
@@ -172,6 +171,7 @@ import com.cloud.api.response.ApiResponseSerializer;
 import com.cloud.capacity.Capacity;
 import com.cloud.capacity.CapacityVO;
 import com.cloud.capacity.dao.CapacityDaoImpl.SummedCapacity;
+import com.cloud.configuration.ConfigurationManager;
 import com.cloud.configuration.Resource.ResourceOwnerType;
 import com.cloud.configuration.Resource.ResourceType;
 import com.cloud.configuration.ResourceCount;
@@ -199,6 +199,7 @@ import com.cloud.network.Network.Provider;
 import com.cloud.network.Network.Service;
 import com.cloud.network.NetworkModel;
 import com.cloud.network.NetworkProfile;
+import com.cloud.network.Networks.BroadcastDomainType;
 import com.cloud.network.Networks.IsolationType;
 import com.cloud.network.Networks.TrafficType;
 import com.cloud.network.PhysicalNetwork;
@@ -309,6 +310,8 @@ public class ApiResponseHelper implements ResponseGenerator {
     protected AccountManager _accountMgr;
     @Inject
     protected AsyncJobManager _jobMgr;
+    @Inject
+    ConfigurationManager _configMgr;
 
     @Override
     public UserResponse createUserResponse(User user) {
@@ -2089,7 +2092,7 @@ public class ApiResponseHelper implements ResponseGenerator {
 
             serviceResponses.add(svcRsp);
         }
-        response.setForVpc(ApiDBUtils.isOfferingForVpc(offering));
+        response.setForVpc(_configMgr.isOfferingForVpc(offering));
 
         response.setServices(serviceResponses);
 
@@ -2178,8 +2181,8 @@ public class ApiResponseHelper implements ResponseGenerator {
             String broadcastUri = network.getBroadcastUri().toString();
             response.setBroadcastUri(broadcastUri);
             String vlan = "N/A";
-            if (broadcastUri.startsWith("vlan")) {
-                vlan = broadcastUri.substring("vlan://".length(), broadcastUri.length());
+            if (BroadcastDomainType.Vlan.scheme().equals(BroadcastDomainType.getSchemeValue(network.getBroadcastUri()))) {
+                vlan = BroadcastDomainType.getValue(network.getBroadcastUri());
             }
             // return vlan information only to Root admin
             response.setVlan(vlan);
@@ -2202,6 +2205,7 @@ public class ApiResponseHelper implements ResponseGenerator {
             response.setNetworkOfferingId(networkOffering.getUuid());
             response.setNetworkOfferingName(networkOffering.getName());
             response.setNetworkOfferingDisplayText(networkOffering.getDisplayText());
+            response.setNetworkOfferingConserveMode(networkOffering.isConserveMode());
             response.setIsSystem(networkOffering.isSystemOnly());
             response.setNetworkOfferingAvailability(networkOffering.getAvailability().toString());
             response.setIsPersistent(networkOffering.getIsPersistent());
@@ -2801,20 +2805,6 @@ public class ApiResponseHelper implements ResponseGenerator {
     }
 
     @Override
-    public LDAPConfigResponse createLDAPConfigResponse(String hostname, Integer port, Boolean useSSL, String queryFilter, String searchBase,
-            String bindDN) {
-        LDAPConfigResponse lr = new LDAPConfigResponse();
-        lr.setHostname(hostname);
-        lr.setPort(port.toString());
-        lr.setUseSSL(useSSL.toString());
-        lr.setQueryFilter(queryFilter);
-        lr.setBindDN(bindDN);
-        lr.setSearchBase(searchBase);
-        lr.setObjectName("ldapconfig");
-        return lr;
-    }
-
-    @Override
     public StorageNetworkIpRangeResponse createStorageNetworkIpRangeResponse(StorageNetworkIpRange result) {
         StorageNetworkIpRangeResponse response = new StorageNetworkIpRangeResponse();
         response.setUuid(result.getUuid());
@@ -2837,6 +2827,8 @@ public class ApiResponseHelper implements ResponseGenerator {
         response.setName(region.getName());
         response.setEndPoint(region.getEndPoint());
         response.setObjectName("region");
+        response.setGslbServiceEnabled(region.checkIfServiceEnabled(Region.Service.Gslb));
+        response.setPortableipServiceEnabled(region.checkIfServiceEnabled(Region.Service.PortableIp));
         return response;
     }
 
@@ -3146,7 +3138,7 @@ public class ApiResponseHelper implements ResponseGenerator {
         response.setIp(ApiDBUtils.findIpAddressById(result.getAddrId()).getAddress().toString());
         Vpc vpc = ApiDBUtils.findVpcById(result.getVpcId());
         if (vpc != null) {
-            response.setVpcId(result.getUuid());
+            response.setVpcId(vpc.getUuid());
         }
         response.setRemoved(result.getRemoved());
         response.setObjectName("vpngateway");
@@ -3378,11 +3370,15 @@ public class ApiResponseHelper implements ResponseGenerator {
         } else if(usageRecord.getUsageType() == UsageTypes.LOAD_BALANCER_POLICY){
             //Load Balancer Policy ID
             LoadBalancerVO lb = _entityMgr.findById(LoadBalancerVO.class, usageRecord.getUsageId().toString());
-            usageRecResponse.setUsageId(lb.getUuid());
+            if(lb != null){
+                usageRecResponse.setUsageId(lb.getUuid());
+            }
         } else if(usageRecord.getUsageType() == UsageTypes.PORT_FORWARDING_RULE){
             //Port Forwarding Rule ID
             PortForwardingRuleVO pf = _entityMgr.findById(PortForwardingRuleVO.class, usageRecord.getUsageId().toString());
-            usageRecResponse.setUsageId(pf.getUuid());
+            if(pf != null){
+                usageRecResponse.setUsageId(pf.getUuid());
+            }
 
         } else if(usageRecord.getUsageType() == UsageTypes.NETWORK_OFFERING){
             //Network Offering Id
@@ -3394,7 +3390,9 @@ public class ApiResponseHelper implements ResponseGenerator {
         } else if(usageRecord.getUsageType() == UsageTypes.VPN_USERS){
             //VPN User ID
             VpnUserVO vpnUser = _entityMgr.findById(VpnUserVO.class, usageRecord.getUsageId().toString());
-            usageRecResponse.setUsageId(vpnUser.getUuid());
+            if(vpnUser != null){
+                usageRecResponse.setUsageId(vpnUser.getUuid());
+            }
 
         } else if(usageRecord.getUsageType() == UsageTypes.SECURITY_GROUP){
             //Security Group Id
@@ -3684,6 +3682,7 @@ public class ApiResponseHelper implements ResponseGenerator {
         response.setGateway(ipRange.getGateway());
         response.setNetmask(ipRange.getNetmask());
         response.setRegionId(ipRange.getRegionId());
+        response.setObjectName("portableiprange");
         return response;
     }
 
@@ -3730,7 +3729,7 @@ public class ApiResponseHelper implements ResponseGenerator {
         }
 
         response.setState(portableIp.getState().name());
-
+        response.setObjectName("portableip");
         return response;
     }
 

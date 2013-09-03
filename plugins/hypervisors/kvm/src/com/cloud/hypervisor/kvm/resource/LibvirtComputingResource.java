@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
@@ -55,6 +56,7 @@ import java.util.concurrent.Future;
 import javax.ejb.Local;
 import javax.naming.ConfigurationException;
 
+import com.cloud.agent.api.CheckOnHostCommand;
 import org.apache.commons.io.FileUtils;
 import org.apache.log4j.Logger;
 import org.libvirt.Connect;
@@ -768,9 +770,11 @@ ServerResource {
             if(_hypervisorLibvirtVersion < (9 * 1000 + 10)) {
                 s_logger.warn("LibVirt version 0.9.10 required for guest cpu mode, but version " +
                         prettyVersion(_hypervisorLibvirtVersion) + " detected, so it will be disabled");
-                _guestCpuMode = null;
-                _guestCpuModel = null;
+                _guestCpuMode = "";
+                _guestCpuModel = "";
             }
+            params.put("guest.cpu.mode", _guestCpuMode);
+            params.put("guest.cpu.model", _guestCpuModel);
         }
 
         String[] info = NetUtils.getNetworkParams(_privateNic);
@@ -1092,7 +1096,7 @@ ServerResource {
         }
     }
 
-    private void passCmdLine(String vmName, String cmdLine)
+    private boolean passCmdLine(String vmName, String cmdLine)
             throws InternalErrorException {
         final Script command = new Script(_patchViaSocketPath, 5*1000, s_logger);
         String result;
@@ -1101,7 +1105,9 @@ ServerResource {
         result = command.execute();
         if (result != null) {
             s_logger.debug("passcmd failed:" + result);
+            return false;
         }
+        return true;
     }
 
     boolean isDirectAttachedNetwork(String type) {
@@ -1279,6 +1285,8 @@ ServerResource {
                 return storageHandler.handleStorageCommands((StorageSubSystemCommand)cmd);
             } else if (cmd instanceof PvlanSetupCommand) {
                 return execute((PvlanSetupCommand) cmd);
+            } else if (cmd instanceof CheckOnHostCommand) {
+                return execute((CheckOnHostCommand)cmd);
             } else {
                 s_logger.warn("Unsupported command ");
                 return Answer.createUnsupportedCommandAnswer(cmd);
@@ -1412,6 +1420,26 @@ ServerResource {
 
     }
 
+    protected Answer execute(CheckOnHostCommand cmd) {
+        ExecutorService executors = Executors.newSingleThreadExecutor();
+        List<NfsStoragePool> pools = _monitor.getStoragePools();
+        KVMHAChecker ha = new KVMHAChecker(pools, cmd.getHost().getPrivateNetwork().getIp());
+        Future<Boolean> future = executors.submit(ha);
+        try {
+            Boolean result = future.get();
+            if (result) {
+                return new Answer(cmd, false, "Heart is still beating...");
+            } else {
+                return new Answer(cmd);
+            }
+        } catch (InterruptedException e) {
+            return new Answer(cmd, false, "can't get status of host:");
+        } catch (ExecutionException e) {
+            return new Answer(cmd, false, "can't get status of host:");
+        }
+
+    }
+
     protected Storage.StorageResourceType getStorageResourceType() {
         return Storage.StorageResourceType.STORAGE_POOL;
     }
@@ -1539,35 +1567,66 @@ ServerResource {
             String path = vol.getPath();
             String type = getResizeScriptType(pool, vol);
 
-            if (type == null) {
-                return new ResizeVolumeAnswer(cmd, false, "Unsupported volume format: pool type '"
-                                + pool.getType() + "' and volume format '" + vol.getFormat() + "'");
-            } else if (type.equals("QCOW2") && shrinkOk) {
-                return new ResizeVolumeAnswer(cmd, false, "Unable to shrink volumes of type " + type);
+            /**
+             * RBD volumes can't be resized via a Bash script or via libvirt
+             *
+             * libvirt-java doesn't implemented resizing volumes, so we have to do this manually
+             *
+             * Future fix would be to hand this over to libvirt
+             */
+            if (pool.getType() == StoragePoolType.RBD) {
+                try {
+                    Rados r = new Rados(pool.getAuthUserName());
+                    r.confSet("mon_host", pool.getSourceHost() + ":" + pool.getSourcePort());
+                    r.confSet("key", pool.getAuthSecret());
+                    r.connect();
+                    s_logger.debug("Succesfully connected to Ceph cluster at " + r.confGet("mon_host"));
+
+                    IoCTX io = r.ioCtxCreate(pool.getSourceDir());
+                    Rbd rbd = new Rbd(io);
+                    RbdImage image = rbd.open(vol.getName());
+
+                    s_logger.debug("Resizing RBD volume " + vol.getName() +  " to " + newSize + " bytes"); 
+                    image.resize(newSize);
+                    rbd.close(image);
+
+                    r.ioCtxDestroy(io);
+                    s_logger.debug("Succesfully resized RBD volume " + vol.getName() +  " to " + newSize + " bytes"); 
+                } catch (RadosException e) {
+                    return new ResizeVolumeAnswer(cmd, false, e.toString());
+                } catch (RbdException e) {
+                    return new ResizeVolumeAnswer(cmd, false, e.toString());
+                }
+            } else {
+                if (type == null) {
+                    return new ResizeVolumeAnswer(cmd, false, "Unsupported volume format: pool type '"
+                                    + pool.getType() + "' and volume format '" + vol.getFormat() + "'");
+                } else if (type.equals("QCOW2") && shrinkOk) {
+                    return new ResizeVolumeAnswer(cmd, false, "Unable to shrink volumes of type " + type);
+                }
+
+                s_logger.debug("got to the stage where we execute the volume resize, params:"
+                            + path + "," + currentSize + "," + newSize + "," + type + "," + vmInstanceName + "," + shrinkOk);
+                final Script resizecmd = new Script(_resizeVolumePath,
+                            _cmdsTimeout, s_logger);
+                resizecmd.add("-s",String.valueOf(newSize));
+                resizecmd.add("-c",String.valueOf(currentSize));
+                resizecmd.add("-p",path);
+                resizecmd.add("-t",type);
+                resizecmd.add("-r",String.valueOf(shrinkOk));
+                resizecmd.add("-v",vmInstanceName);
+                String result = resizecmd.execute();
+
+                if (result != null) {
+                    return new ResizeVolumeAnswer(cmd, false, result);
+                }
             }
 
-            s_logger.debug("got to the stage where we execute the volume resize, params:"
-                           + path + "," + currentSize + "," + newSize + "," + type + "," + vmInstanceName + "," + shrinkOk);
-            final Script resizecmd = new Script(_resizeVolumePath,
-                        _cmdsTimeout, s_logger);
-            resizecmd.add("-s",String.valueOf(newSize));
-            resizecmd.add("-c",String.valueOf(currentSize));
-            resizecmd.add("-p",path);
-            resizecmd.add("-t",type);
-            resizecmd.add("-r",String.valueOf(shrinkOk));
-            resizecmd.add("-v",vmInstanceName);
-            String result = resizecmd.execute();
-
-            if (result == null) {
-
-                /* fetch new size as seen from libvirt, don't want to assume anything */
-                pool = _storagePoolMgr.getStoragePool(spool.getType(), spool.getUuid());
-                long finalSize = pool.getPhysicalDisk(volid).getVirtualSize();
-                s_logger.debug("after resize, size reports as " + finalSize + ", requested " + newSize);
-                return new ResizeVolumeAnswer(cmd, true, "success", finalSize);
-            }
-
-            return new ResizeVolumeAnswer(cmd, false, result);
+            /* fetch new size as seen from libvirt, don't want to assume anything */
+            pool = _storagePoolMgr.getStoragePool(spool.getType(), spool.getUuid());
+            long finalSize = pool.getPhysicalDisk(volid).getVirtualSize();
+            s_logger.debug("after resize, size reports as " + finalSize + ", requested " + newSize);
+            return new ResizeVolumeAnswer(cmd, true, "success", finalSize);
         } catch (CloudRuntimeException e) {
             String error = "failed to resize volume: " + e;
             s_logger.debug(error);
@@ -1671,8 +1730,9 @@ ServerResource {
         if (vlanId == null) {
             nicTO.setBroadcastType(BroadcastDomainType.Native);
         } else {
-            nicTO.setBroadcastType(BroadcastDomainType.Vlan);
-            nicTO.setBroadcastUri(BroadcastDomainType.Vlan.toUri(vlanId));
+            URI uri = BroadcastDomainType.fromString(vlanId);
+            nicTO.setBroadcastType(BroadcastDomainType.getSchemeValue(uri));
+            nicTO.setBroadcastUri(uri);
         }
 
         Domain vm = getDomain(conn, vmName);
@@ -1682,9 +1742,10 @@ ServerResource {
     private PlugNicAnswer execute(PlugNicCommand cmd) {
         NicTO nic = cmd.getNic();
         String vmName = cmd.getVmName();
+        Domain vm = null;
         try {
             Connect conn = LibvirtConnection.getConnectionByVmName(vmName);
-            Domain vm = getDomain(conn, vmName);
+            vm = getDomain(conn, vmName);
             List<InterfaceDef> pluggedNics = getInterfaces(conn, vmName);
             Integer nicnum = 0;
             for (InterfaceDef pluggedNic : pluggedNics) {
@@ -1704,6 +1765,14 @@ ServerResource {
             String msg = " Plug Nic failed due to " + e.toString();
             s_logger.warn(msg, e);
             return new PlugNicAnswer(cmd, false, msg);
+        } finally {
+            if (vm != null) {
+                try {
+                    vm.free();
+                } catch (LibvirtException l) {
+                    s_logger.trace("Ignoring libvirt error.", l);
+                }
+            }
         }
     }
 
@@ -1711,9 +1780,10 @@ ServerResource {
         Connect conn;
         NicTO nic = cmd.getNic();
         String vmName = cmd.getVmName();
+        Domain vm = null;
         try {
             conn = LibvirtConnection.getConnectionByVmName(vmName);
-            Domain vm = getDomain(conn, vmName);
+            vm = getDomain(conn, vmName);
             List<InterfaceDef> pluggedNics = getInterfaces(conn, vmName);
             for (InterfaceDef pluggedNic : pluggedNics) {
                 if (pluggedNic.getMacAddress().equalsIgnoreCase(nic.getMac())) {
@@ -1731,6 +1801,14 @@ ServerResource {
             String msg = " Unplug Nic failed due to " + e.toString();
             s_logger.warn(msg, e);
             return new UnPlugNicAnswer(cmd, false, msg);
+        } finally {
+            if (vm != null) {
+                try {
+                    vm.free();
+                } catch (LibvirtException l) {
+                    s_logger.trace("Ignoring libvirt error.", l);
+                }
+            }
         }
     }
 
@@ -1741,7 +1819,7 @@ ServerResource {
         String routerGIP = cmd.getAccessDetail(NetworkElementCommand.ROUTER_GUEST_IP);
         String routerName = cmd.getAccessDetail(NetworkElementCommand.ROUTER_NAME);
         String gateway = cmd.getAccessDetail(NetworkElementCommand.GUEST_NETWORK_GATEWAY);
-        String cidr = Long.toString(NetUtils.getCidrSize(nic.getNetmask()));;
+        String cidr = Long.toString(NetUtils.getCidrSize(nic.getNetmask()));
         String domainName = cmd.getNetworkDomain();
         String dns = cmd.getDefaultDns1();
 
@@ -3309,23 +3387,25 @@ ServerResource {
         cmd.setModel(_guestCpuModel);
         vm.addComp(cmd);
 
-        CpuTuneDef ctd = new CpuTuneDef();
-        /**
-            A 4.0.X/4.1.X management server doesn't send the correct JSON
-            command for getMinSpeed, it only sends a 'speed' field.
+        if (_hypervisorLibvirtVersion >= 9000) {
+            CpuTuneDef ctd = new CpuTuneDef();
+            /**
+             A 4.0.X/4.1.X management server doesn't send the correct JSON
+             command for getMinSpeed, it only sends a 'speed' field.
 
-            So if getMinSpeed() returns null we fall back to getSpeed().
+             So if getMinSpeed() returns null we fall back to getSpeed().
 
-            This way a >4.1 agent can work communicate a <=4.1 management server
+             This way a >4.1 agent can work communicate a <=4.1 management server
 
-            This change is due to the overcommit feature in 4.2
-        */
-        if (vmTO.getMinSpeed() != null) {
-            ctd.setShares(vmTO.getCpus() * vmTO.getMinSpeed());
-        } else {
-            ctd.setShares(vmTO.getCpus() * vmTO.getSpeed());
+             This change is due to the overcommit feature in 4.2
+             */
+            if (vmTO.getMinSpeed() != null) {
+                ctd.setShares(vmTO.getCpus() * vmTO.getMinSpeed());
+            } else {
+                ctd.setShares(vmTO.getCpus() * vmTO.getSpeed());
+            }
+            vm.addComp(ctd);
         }
-        vm.addComp(ctd);
 
         FeaturesDef features = new FeaturesDef();
         features.addFeatures("pae");
@@ -3343,8 +3423,6 @@ ServerResource {
         if (vmTO.getOs().startsWith("Windows")) {
             clock.setClockOffset(ClockDef.ClockOffset.LOCALTIME);
             clock.setTimer("rtc", "catchup", null);
-        } else if (vmTO.getType() != VirtualMachine.Type.User) {
-            clock.setTimer("kvmclock", "catchup", null);
         }
 
         vm.addComp(clock);
@@ -3441,8 +3519,12 @@ ServerResource {
             // pass cmdline info to system vms
             if (vmSpec.getType() != VirtualMachine.Type.User) {
                 if ((_kernelVersion < 2006034) && (conn.getVersion() < 1001000)) { // CLOUDSTACK-2823: try passCmdLine some times if kernel < 2.6.34 and qemu < 1.1.0 on hypervisor (for instance, CentOS 6.4)
-                    for (int count = 0; count < 10; count ++) {
-                        passCmdLine(vmName, vmSpec.getBootArgs());
+                    //wait for 5 minutes at most
+                    for (int count = 0; count < 30; count ++) {
+                        boolean succeed = passCmdLine(vmName, vmSpec.getBootArgs());
+                        if (succeed) {
+                            break;
+                        }
                         try {
                             Thread.sleep(5000);
                         } catch (InterruptedException e) {
@@ -4371,6 +4453,10 @@ ServerResource {
                 }
             }
         } catch (LibvirtException e) {
+            if (e.getMessage().contains("Domain not found")) {
+                s_logger.debug("VM " + vmName + " doesn't exist, no need to stop it");
+                return null;
+            }
             s_logger.debug("Failed to stop VM :" + vmName + " :", e);
             return e.getMessage();
         } catch (InterruptedException ie) {

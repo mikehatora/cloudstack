@@ -21,14 +21,15 @@ import javax.inject.Inject;
 import org.apache.cloudstack.engine.subsystem.api.storage.*;
 import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine.Event;
 import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine.State;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.storage.command.CreateObjectAnswer;
 import org.apache.cloudstack.storage.datastore.db.SnapshotDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.SnapshotDataStoreVO;
 import org.apache.cloudstack.storage.to.SnapshotObjectTO;
+
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Component;
 
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.exception.InvalidParameterValueException;
 import com.cloud.storage.DataStoreRole;
 import com.cloud.storage.Snapshot;
@@ -179,7 +180,6 @@ public class XenserverSnapshotStrategy extends SnapshotStrategyBase {
             return true;
         }
 
-
         if (snapshotVO.getState() == Snapshot.State.CreatedOnPrimary) {
             s_logger.debug("delete snapshot on primary storage:");
             snapshotVO.setState(Snapshot.State.Destroyed);
@@ -192,13 +192,14 @@ public class XenserverSnapshotStrategy extends SnapshotStrategyBase {
                     + " due to it is not in BackedUp Status");
         }
 
-        // firt mark the snapshot as destroyed, so that ui can't see it, but we
-        // may not destroy the snapshot on the storage, as other snaphosts may
+        // first mark the snapshot as destroyed, so that ui can't see it, but we
+        // may not destroy the snapshot on the storage, as other snapshots may
         // depend on it.
         SnapshotInfo snapshotOnImage = this.snapshotDataFactory.getSnapshot(snapshotId, DataStoreRole.Image);
         if (snapshotOnImage == null) {
             s_logger.debug("Can't find snapshot on backup storage, delete it in db");
             snapshotDao.remove(snapshotId);
+            return true;
         }
 
         SnapshotObject obj = (SnapshotObject) snapshotOnImage;
@@ -227,6 +228,7 @@ public class XenserverSnapshotStrategy extends SnapshotStrategyBase {
             } catch (NoTransitionException e1) {
                 s_logger.debug("Failed to change snapshot state: " + e.toString());
             }
+            return false;
         }
 
         return true;

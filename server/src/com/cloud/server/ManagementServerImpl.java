@@ -22,7 +22,10 @@ import java.net.URLDecoder;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -87,8 +90,6 @@ import org.apache.cloudstack.api.command.admin.internallb.ListInternalLBVMsCmd;
 import org.apache.cloudstack.api.command.admin.internallb.ListInternalLoadBalancerElementsCmd;
 import org.apache.cloudstack.api.command.admin.internallb.StartInternalLBVMCmd;
 import org.apache.cloudstack.api.command.admin.internallb.StopInternalLBVMCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPConfigCmd;
-import org.apache.cloudstack.api.command.admin.ldap.LDAPRemoveCmd;
 import org.apache.cloudstack.api.command.admin.network.AddNetworkDeviceCmd;
 import org.apache.cloudstack.api.command.admin.network.AddNetworkServiceProviderCmd;
 import org.apache.cloudstack.api.command.admin.network.CreateNetworkOfferingCmd;
@@ -148,17 +149,19 @@ import org.apache.cloudstack.api.command.admin.storage.AddS3Cmd;
 import org.apache.cloudstack.api.command.admin.storage.CancelPrimaryStorageMaintenanceCmd;
 import org.apache.cloudstack.api.command.admin.storage.CreateSecondaryStagingStoreCmd;
 import org.apache.cloudstack.api.command.admin.storage.CreateStoragePoolCmd;
-import org.apache.cloudstack.api.command.admin.storage.DeleteSecondaryStagingStoreCmd;
 import org.apache.cloudstack.api.command.admin.storage.DeleteImageStoreCmd;
 import org.apache.cloudstack.api.command.admin.storage.DeletePoolCmd;
+import org.apache.cloudstack.api.command.admin.storage.DeleteSecondaryStagingStoreCmd;
 import org.apache.cloudstack.api.command.admin.storage.FindStoragePoolsForMigrationCmd;
-import org.apache.cloudstack.api.command.admin.storage.ListSecondaryStagingStoresCmd;
 import org.apache.cloudstack.api.command.admin.storage.ListImageStoresCmd;
 import org.apache.cloudstack.api.command.admin.storage.ListS3sCmd;
+import org.apache.cloudstack.api.command.admin.storage.ListSecondaryStagingStoresCmd;
 import org.apache.cloudstack.api.command.admin.storage.ListStoragePoolsCmd;
 import org.apache.cloudstack.api.command.admin.storage.ListStorageProvidersCmd;
 import org.apache.cloudstack.api.command.admin.storage.PreparePrimaryStorageForMaintenanceCmd;
 import org.apache.cloudstack.api.command.admin.storage.UpdateStoragePoolCmd;
+import org.apache.cloudstack.api.command.admin.swift.AddSwiftCmd;
+import org.apache.cloudstack.api.command.admin.swift.ListSwiftsCmd;
 import org.apache.cloudstack.api.command.admin.systemvm.DestroySystemVmCmd;
 import org.apache.cloudstack.api.command.admin.systemvm.ListSystemVMsCmd;
 import org.apache.cloudstack.api.command.admin.systemvm.MigrateSystemVMCmd;
@@ -422,9 +425,14 @@ import org.apache.cloudstack.api.command.user.vpn.UpdateVpnCustomerGatewayCmd;
 import org.apache.cloudstack.api.command.user.zone.ListZonesByCmd;
 import org.apache.cloudstack.config.Configuration;
 import org.apache.cloudstack.context.CallContext;
+import org.apache.cloudstack.engine.orchestration.service.VolumeOrchestrationService;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
 import org.apache.cloudstack.engine.subsystem.api.storage.StoragePoolAllocator;
 import org.apache.cloudstack.engine.subsystem.api.storage.VolumeDataFactory;
+import org.apache.cloudstack.framework.config.ConfigurationVO;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
+import org.apache.cloudstack.storage.datastore.db.ImageStoreDao;
+import org.apache.cloudstack.storage.datastore.db.ImageStoreVO;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
 import org.apache.cloudstack.utils.identity.ManagementServerNode;
@@ -444,8 +452,6 @@ import com.cloud.capacity.dao.CapacityDao;
 import com.cloud.capacity.dao.CapacityDaoImpl.SummedCapacity;
 import com.cloud.cluster.ClusterManager;
 import com.cloud.configuration.Config;
-import com.cloud.configuration.ConfigurationVO;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.consoleproxy.ConsoleProxyManagementState;
 import com.cloud.consoleproxy.ConsoleProxyManager;
 import com.cloud.dc.AccountVlanMapVO;
@@ -522,7 +528,6 @@ import com.cloud.storage.StorageManager;
 import com.cloud.storage.StoragePool;
 import com.cloud.storage.VMTemplateVO;
 import com.cloud.storage.Volume;
-import com.cloud.storage.VolumeManager;
 import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.DiskOfferingDao;
 import com.cloud.storage.dao.GuestOSCategoryDao;
@@ -582,9 +587,6 @@ import com.cloud.vm.dao.InstanceGroupDao;
 import com.cloud.vm.dao.SecondaryStorageVmDao;
 import com.cloud.vm.dao.UserVmDao;
 import com.cloud.vm.dao.VMInstanceDao;
-
-import edu.emory.mathcs.backport.java.util.Arrays;
-import edu.emory.mathcs.backport.java.util.Collections;
 
 
 public class ManagementServerImpl extends ManagerBase implements ManagementServer {
@@ -651,7 +653,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
     @Inject
     private StorageManager _storageMgr;
     @Inject
-    private VolumeManager _volumeMgr;
+    private VolumeOrchestrationService _volumeMgr;
     @Inject
     private VirtualMachineManager _itMgr;
     @Inject
@@ -675,6 +677,8 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
     private List<StoragePoolAllocator> _storagePoolAllocators;
     @Inject
     private ResourceTagDao _resourceTagDao;
+    @Inject
+    private ImageStoreDao _imgStoreDao;
 
     @Inject
     ProjectManager _projectMgr;
@@ -712,6 +716,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
 
     private List<UserAuthenticator> _userAuthenticators;
     private List<UserAuthenticator> _userPasswordEncoders;
+    protected boolean _executeInSequence;
 
     protected List<DeploymentPlanner> _planners;
 
@@ -796,6 +801,8 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
             _availableIdsMap.put(id, true);
         }
 
+        _executeInSequence = Boolean.parseBoolean(_configDao.getValue(Config.ExecuteInSequence.key()));
+
         return true;
     }
 
@@ -859,7 +866,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         boolean result =true;
         List<Long> permittedAccountIds = new ArrayList<Long>();
 
-        if (caller.getType() == Account.ACCOUNT_TYPE_NORMAL && caller.getType() == Account.ACCOUNT_TYPE_PROJECT) {
+        if (caller.getType() == Account.ACCOUNT_TYPE_NORMAL || caller.getType() == Account.ACCOUNT_TYPE_PROJECT) {
             permittedAccountIds.add(caller.getId());
         } else {
             DomainVO domain = _domainDao.findById(caller.getDomainId());
@@ -1066,10 +1073,13 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
 
         // Check if the vm can be migrated with storage.
         boolean canMigrateWithStorage = false;
-        HypervisorCapabilitiesVO capabilities = _hypervisorCapabilitiesDao.findByHypervisorTypeAndVersion(
-                srcHost.getHypervisorType(), srcHost.getHypervisorVersion());
-        if (capabilities != null) {
-            canMigrateWithStorage = capabilities.isStorageMotionSupported();
+
+        if (vm.getType() == VirtualMachine.Type.User) {
+            HypervisorCapabilitiesVO capabilities = _hypervisorCapabilitiesDao.findByHypervisorTypeAndVersion(
+                    srcHost.getHypervisorType(), srcHost.getHypervisorVersion());
+            if (capabilities != null) {
+                canMigrateWithStorage = capabilities.isStorageMotionSupported();
+            }
         }
 
         // Check if the vm is using any disks on local storage.
@@ -1094,6 +1104,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         List<HostVO> allHosts = null;
         Map<Host, Boolean> requiresStorageMotion = new HashMap<Host, Boolean>();
         DataCenterDeployment plan = null;
+        boolean zoneWideStoragePool = false;
         if (canMigrateWithStorage) {
             allHostsPair = searchForServers(startIndex, pageSize, null, hostType, null, srcHost.getDataCenterId(), null,
                     null, null, null, null, null, srcHost.getHypervisorType(), srcHost.getHypervisorVersion());
@@ -1107,7 +1118,10 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
                 if (volumePools.isEmpty()) {
                     iterator.remove();
                 } else {
-                    if (!host.getClusterId().equals(srcHost.getClusterId()) || usesLocal) {
+                    if (srcHost.getHypervisorType() == HypervisorType.VMware || srcHost.getHypervisorType() == HypervisorType.KVM) {
+                        zoneWideStoragePool = checkForZoneWideStoragePool(volumePools);
+                    }
+                    if ((!host.getClusterId().equals(srcHost.getClusterId()) || usesLocal) && !zoneWideStoragePool) {
                         requiresStorageMotion.put(host, true);
                     }
                 }
@@ -1169,6 +1183,22 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
                 suitableHosts, requiresStorageMotion);
     }
 
+    private boolean checkForZoneWideStoragePool(Map<Volume, List<StoragePool>> volumePools) {
+        boolean zoneWideStoragePool = false;
+        Collection<List<StoragePool>> pools = volumePools.values();
+        List<StoragePool> aggregatePoolList = new ArrayList<StoragePool>();
+        for (Iterator<List<StoragePool>> volumePoolsIter = pools.iterator(); volumePoolsIter.hasNext();) {
+            aggregatePoolList.addAll(volumePoolsIter.next());
+        }
+        for (StoragePool pool : aggregatePoolList) {
+            if (null == pool.getClusterId()) {
+                zoneWideStoragePool = true;
+                break;
+            }
+        }
+        return zoneWideStoragePool;
+    }
+
     private Map<Volume, List<StoragePool>> findSuitablePoolsForVolumes(VirtualMachineProfile vmProfile,
             Host host) {
         List<VolumeVO> volumes = _volumeDao.findCreatedByInstance(vmProfile.getId());
@@ -1224,18 +1254,6 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         // Volume must be attached to an instance for live migration.
         List<StoragePool> allPools = new ArrayList<StoragePool>();
         List<StoragePool> suitablePools = new ArrayList<StoragePool>();
-        Long instanceId = volume.getInstanceId();
-        VMInstanceVO vm = null;
-        if (instanceId != null) {
-            vm = _vmInstanceDao.findById(instanceId);
-        }
-
-        // Check that the VM is in correct state.
-        if (vm == null || vm.getState() != State.Running) {
-            s_logger.info("Volume " + volume + " isn't attached to any running vm. Only volumes attached to a running" +
-                    " VM can be migrated.");
-            return new Pair<List<? extends StoragePool>, List<? extends StoragePool>>(allPools, suitablePools);
-        }
 
         // Volume must be in Ready state to be migrated.
         if (!Volume.State.Ready.equals(volume.getState())) {
@@ -1248,70 +1266,91 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
             return new Pair<List<? extends StoragePool>, List<? extends StoragePool>>(allPools, suitablePools);
         }
 
-        // Check if the underlying hypervisor supports storage motion.
-        boolean storageMotionSupported = false;
-        Long hostId = vm.getHostId();
-        if (hostId != null) {
-            HostVO host = _hostDao.findById(hostId);
-            HypervisorCapabilitiesVO capabilities = null;
-            if (host != null) {
-                capabilities = _hypervisorCapabilitiesDao.findByHypervisorTypeAndVersion(host.getHypervisorType(),
-                        host.getHypervisorVersion());
-            } else {
-                s_logger.error("Details of the host on which the vm " + vm + ", to which volume "+ volume + " is "
-                        + "attached, couldn't be retrieved.");
-            }
-
-            if (capabilities != null) {
-                storageMotionSupported = capabilities.isStorageMotionSupported();
-            } else {
-                s_logger.error("Capabilities for host " + host + " couldn't be retrieved.");
-            }
+        Long instanceId = volume.getInstanceId();
+        VMInstanceVO vm = null;
+        if (instanceId != null) {
+            vm = _vmInstanceDao.findById(instanceId);
         }
 
-        if (storageMotionSupported) {
-            // Source pool of the volume.
-            StoragePoolVO srcVolumePool = _poolDao.findById(volume.getPoolId());
+        if (vm == null) {
+            s_logger.info("Volume " + volume + " isn't attached to any vm. Looking for storage pools in the " +
+                    "zone to which this volumes can be migrated.");
+        } else if (vm.getState() != State.Running) {
+            s_logger.info("Volume " + volume + " isn't attached to any running vm. Looking for storage pools in the " +
+                    "cluster to which this volumes can be migrated.");
+        } else {
+            s_logger.info("Volume " + volume + " is attached to any running vm. Looking for storage pools in the " +
+                    "cluster to which this volumes can be migrated.");
+            boolean storageMotionSupported = false;
+            // Check if the underlying hypervisor supports storage motion.
+            Long hostId = vm.getHostId();
+            if (hostId != null) {
+                HostVO host = _hostDao.findById(hostId);
+                HypervisorCapabilitiesVO capabilities = null;
+                if (host != null) {
+                    capabilities = _hypervisorCapabilitiesDao.findByHypervisorTypeAndVersion(host.getHypervisorType(),
+                            host.getHypervisorVersion());
+                } else {
+                    s_logger.error("Details of the host on which the vm " + vm + ", to which volume "+ volume + " is "
+                            + "attached, couldn't be retrieved.");
+                }
 
-            // Get all the pools available. Only shared pools are considered because only a volume on a shared pools
-            // can be live migrated while the virtual machine stays on the same host.
-            List<StoragePoolVO> storagePools = null;
-            if (srcVolumePool.getClusterId() == null) {
-                storagePools = _poolDao.findZoneWideStoragePoolsByTags(volume.getDataCenterId(), null);
-            } else {
-                storagePools = _poolDao.findPoolsByTags(volume.getDataCenterId(), srcVolumePool.getPodId(), srcVolumePool.getClusterId(), null);
-            }
-
-            storagePools.remove(srcVolumePool);
-            for (StoragePoolVO pool : storagePools) {
-                if (pool.isShared()) {
-                    allPools.add((StoragePool)dataStoreMgr.getPrimaryDataStore(pool.getId()));
+                if (capabilities != null) {
+                    storageMotionSupported = capabilities.isStorageMotionSupported();
+                } else {
+                    s_logger.error("Capabilities for host " + host + " couldn't be retrieved.");
                 }
             }
 
-            // Get all the suitable pools.
-            // Exclude the current pool from the list of pools to which the volume can be migrated.
-            ExcludeList avoid = new ExcludeList();
-            avoid.addPool(srcVolumePool.getId());
-
-            // Volume stays in the same cluster after migration.
-            DataCenterDeployment plan = new DataCenterDeployment(volume.getDataCenterId(), srcVolumePool.getPodId(),
-                    srcVolumePool.getClusterId(), null, null, null);
-            VirtualMachineProfile profile = new VirtualMachineProfileImpl(vm);
-
-            DiskOfferingVO diskOffering = _diskOfferingDao.findById(volume.getDiskOfferingId());
-            DiskProfile diskProfile = new DiskProfile(volume, diskOffering, profile.getHypervisorType());
-
-            // Call the storage pool allocator to find the list of storage pools.
-            for (StoragePoolAllocator allocator : _storagePoolAllocators) {
-                List<StoragePool> pools = allocator.allocateToPool(diskProfile, profile, plan, avoid,
-                        StoragePoolAllocator.RETURN_UPTO_ALL);
-                if (pools != null && !pools.isEmpty()) {
-                    suitablePools.addAll(pools);
-                    break;
-                }
+            if (!storageMotionSupported) {
+                s_logger.info("Volume " + volume + " is attached to a running vm and the hypervisor doesn't support" +
+                        " storage motion.");
+                return new Pair<List<? extends StoragePool>, List<? extends StoragePool>>(allPools, suitablePools);
             }
         }
+
+        // Source pool of the volume.
+        StoragePoolVO srcVolumePool = _poolDao.findById(volume.getPoolId());
+        // Get all the pools available. Only shared pools are considered because only a volume on a shared pools
+        // can be live migrated while the virtual machine stays on the same host.
+        List<StoragePoolVO> storagePools = null;
+        if (srcVolumePool.getClusterId() == null) {
+            storagePools = _poolDao.findZoneWideStoragePoolsByTags(volume.getDataCenterId(), null);
+        } else {
+            storagePools = _poolDao.findPoolsByTags(volume.getDataCenterId(), srcVolumePool.getPodId(),
+                    srcVolumePool.getClusterId(), null);
+        }
+
+        storagePools.remove(srcVolumePool);
+        for (StoragePoolVO pool : storagePools) {
+            if (pool.isShared()) {
+                allPools.add((StoragePool)dataStoreMgr.getPrimaryDataStore(pool.getId()));
+            }
+        }
+
+        // Get all the suitable pools.
+        // Exclude the current pool from the list of pools to which the volume can be migrated.
+        ExcludeList avoid = new ExcludeList();
+        avoid.addPool(srcVolumePool.getId());
+
+        // Volume stays in the same cluster after migration.
+        DataCenterDeployment plan = new DataCenterDeployment(volume.getDataCenterId(), srcVolumePool.getPodId(),
+                srcVolumePool.getClusterId(), null, null, null);
+        VirtualMachineProfile profile = new VirtualMachineProfileImpl(vm);
+
+        DiskOfferingVO diskOffering = _diskOfferingDao.findById(volume.getDiskOfferingId());
+        DiskProfile diskProfile = new DiskProfile(volume, diskOffering, profile.getHypervisorType());
+
+        // Call the storage pool allocator to find the list of storage pools.
+        for (StoragePoolAllocator allocator : _storagePoolAllocators) {
+            List<StoragePool> pools = allocator.allocateToPool(diskProfile, profile, plan, avoid,
+                    StoragePoolAllocator.RETURN_UPTO_ALL);
+            if (pools != null && !pools.isEmpty()) {
+                suitablePools.addAll(pools);
+                break;
+            }
+        }
+
         return new Pair<List<? extends StoragePool>, List<? extends StoragePool>>(allPools, suitablePools);
     }
 
@@ -2480,8 +2519,6 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         cmdList.add(ReconnectHostCmd.class);
         cmdList.add(UpdateHostCmd.class);
         cmdList.add(UpdateHostPasswordCmd.class);
-        cmdList.add(LDAPConfigCmd.class);
-        cmdList.add(LDAPRemoveCmd.class);
         cmdList.add(AddNetworkDeviceCmd.class);
         cmdList.add(AddNetworkServiceProviderCmd.class);
         cmdList.add(CreateNetworkOfferingCmd.class);
@@ -2530,10 +2567,12 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         cmdList.add(StopRouterCmd.class);
         cmdList.add(UpgradeRouterCmd.class);
         cmdList.add(AddS3Cmd.class);
+        cmdList.add(AddSwiftCmd.class);
         cmdList.add(CancelPrimaryStorageMaintenanceCmd.class);
         cmdList.add(CreateStoragePoolCmd.class);
         cmdList.add(DeletePoolCmd.class);
         cmdList.add(ListS3sCmd.class);
+        cmdList.add(ListSwiftsCmd.class);
         cmdList.add(ListStoragePoolsCmd.class);
         cmdList.add(FindStoragePoolsForMigrationCmd.class);
         cmdList.add(PreparePrimaryStorageForMaintenanceCmd.class);
@@ -3224,6 +3263,13 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         Integer apiLimitInterval = Integer.valueOf(_configDao.getValue(Config.ApiLimitInterval.key()));
         Integer apiLimitMax = Integer.valueOf(_configDao.getValue(Config.ApiLimitMax.key()));
 
+        // check if region-wide secondary storage is used
+        boolean regionSecondaryEnabled = false;
+        List<ImageStoreVO> imgStores = _imgStoreDao.findRegionImageStores();
+        if ( imgStores != null && imgStores.size() > 0){
+            regionSecondaryEnabled = true;
+        }
+
         capabilities.put("securityGroupsEnabled", securityGroupsEnabled);
         capabilities
         .put("userPublicTemplateEnabled", (userPublicTemplateEnabled == null || userPublicTemplateEnabled.equals("false") ? false : true));
@@ -3232,6 +3278,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         capabilities.put("projectInviteRequired", _projectMgr.projectInviteRequired());
         capabilities.put("allowusercreateprojects", _projectMgr.allowUserToCreateProject());
         capabilities.put("customDiskOffMaxSize", diskOffMaxSize);
+        capabilities.put("regionSecondaryEnabled", regionSecondaryEnabled);
         if (apiLimitEnabled) {
             capabilities.put("apiLimitInterval", apiLimitInterval);
             capabilities.put("apiLimitMax", apiLimitMax);
@@ -3431,7 +3478,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
 
     @Override
     public boolean getExecuteInSequence() {
-        return false;  //To change body of implemented methods use File | Settings | File Templates.
+        return  _executeInSequence;
     }
 
     private static String getBase64EncodedRandomKey(int nBits) {
@@ -3586,7 +3633,8 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         _userVmDao.loadDetails(vm);
         String password = vm.getDetail("Encrypted.Password");
         if (password == null || password.equals("")) {
-            InvalidParameterValueException ex = new InvalidParameterValueException("No password for VM with specified id found.");
+            InvalidParameterValueException ex = new InvalidParameterValueException("No password for VM with specified id found. " +
+                "If VM is created from password enabled template and SSH keypair is assigned to VM then only password can be retrieved.");
             ex.addProxyObject(vm.getUuid(), "vmId");
             throw ex;
         }
@@ -3651,7 +3699,7 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
     public String[] listEventTypes() {
         Object eventObj = new EventTypes();
         Class<EventTypes> c = EventTypes.class;
-        Field[] fields = c.getDeclaredFields();
+        Field[] fields = c.getFields();
         String[] eventTypes = new String[fields.length];
         try {
             int i = 0;

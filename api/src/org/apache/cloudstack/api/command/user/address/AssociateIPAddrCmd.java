@@ -18,6 +18,8 @@ package org.apache.cloudstack.api.command.user.address;
 
 import java.util.List;
 
+import org.apache.log4j.Logger;
+
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.ApiCommandJobType;
 import org.apache.cloudstack.api.ApiConstants;
@@ -35,8 +37,6 @@ import org.apache.cloudstack.api.response.RegionResponse;
 import org.apache.cloudstack.api.response.VpcResponse;
 import org.apache.cloudstack.api.response.ZoneResponse;
 import org.apache.cloudstack.context.CallContext;
-
-import org.apache.log4j.Logger;
 
 import com.cloud.dc.DataCenter;
 import com.cloud.dc.DataCenter.NetworkType;
@@ -164,7 +164,7 @@ public class AssociateIPAddrCmd extends BaseAsyncCreateCmd {
             return null;
         }
 
-        DataCenter zone = _configService.getZone(zoneId);
+        DataCenter zone = _entityMgr.findById(DataCenter.class, zoneId);
         if (zone.getNetworkType() == NetworkType.Advanced) {
             List<? extends Network> networks = _networkService.getIsolatedNetworksOwnedByAccountInZone(getZoneId(),
                     _accountService.getAccount(getEntityOwnerId()));
@@ -216,9 +216,9 @@ public class AssociateIPAddrCmd extends BaseAsyncCreateCmd {
                 throw new InvalidParameterValueException("Unable to find network by network id specified");
             }
 
-            NetworkOffering offering = _configService.getNetworkOffering(network.getNetworkOfferingId());
+            NetworkOffering offering = _entityMgr.findById(NetworkOffering.class, network.getNetworkOfferingId());
 
-            DataCenter zone = _configService.getZone(network.getDataCenterId());
+            DataCenter zone = _entityMgr.findById(DataCenter.class, network.getDataCenterId());
             if (zone.getNetworkType() == NetworkType.Basic && offering.getElasticIp() && offering.getElasticLb()) {
                 // Since the basic zone network is owned by 'Root' domain, domain access checkers will fail for the
                 // accounts in non-root domains while acquiring public IP. So add an exception for the 'Basic' zone
@@ -278,8 +278,8 @@ public class AssociateIPAddrCmd extends BaseAsyncCreateCmd {
             }
 
             if (ip != null) {
-                this.setEntityId(ip.getId());
-                this.setEntityUuid(ip.getUuid());
+                setEntityId(ip.getId());
+                setEntityUuid(ip.getUuid());
             } else {
                 throw new ServerApiException(ApiErrorCode.INTERNAL_ERROR, "Failed to allocate ip address");
             }
@@ -309,7 +309,7 @@ public class AssociateIPAddrCmd extends BaseAsyncCreateCmd {
         if (result != null) {
             IPAddressResponse ipResponse = _responseGenerator.createIPAddressResponse(result);
             ipResponse.setResponseName(getCommandName());
-            this.setResponseObject(ipResponse);
+            setResponseObject(ipResponse);
         } else {
             throw new ServerApiException(ApiErrorCode.INTERNAL_ERROR, "Failed to assign ip address");
         }

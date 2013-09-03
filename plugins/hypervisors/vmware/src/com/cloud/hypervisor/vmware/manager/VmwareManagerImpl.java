@@ -48,6 +48,7 @@ import org.apache.cloudstack.api.command.admin.zone.ListVmwareDcsCmd;
 import org.apache.cloudstack.api.command.admin.zone.RemoveVmwareDcCmd;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStore;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.utils.identity.ManagementServerNode;
 
 import com.cloud.agent.AgentManager;
@@ -59,7 +60,6 @@ import com.cloud.agent.api.Command;
 import com.cloud.agent.api.StartupCommand;
 import com.cloud.agent.api.StartupRoutingCommand;
 import com.cloud.configuration.Config;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.ClusterDetailsDao;
 import com.cloud.dc.ClusterVO;
 import com.cloud.dc.ClusterVSMMapVO;
@@ -754,11 +754,10 @@ public class VmwareManagerImpl extends ManagerBase implements VmwareManager, Vmw
 
         // Change permissions for the mountpoint
         script = new Script(true, "chmod", _timeout, s_logger);
-        script.add("777", mountPoint);
+        script.add("-R", "777", mountPoint);
         result = script.execute();
         if (result != null) {
             s_logger.warn("Unable to set permissions for " + mountPoint + " due to " + result);
-            return null;
         }
         return mountPoint;
     }
@@ -1162,9 +1161,15 @@ public class VmwareManagerImpl extends ManagerBase implements VmwareManager, Vmw
         // Check if zone with specified id exists
         DataCenterVO zone = _dcDao.findById(zoneId);
         if (zone == null) {
-            InvalidParameterValueException ex = new InvalidParameterValueException(
-                    "Can't find zone by the id specified.");
-            throw ex;
+            throw new InvalidParameterValueException("Can't find zone by the id specified.");
+        }
+        // Check if zone is legacy zone
+        if (isLegacyZone(zoneId)) {
+            throw new InvalidParameterValueException("The specified zone is legacy zone. Adding VMware datacenter to legacy zone is not supported.");
+        } else {
+            if (s_logger.isTraceEnabled()) {
+                s_logger.trace("The specified zone is not legacy zone.");
+            }
         }
     }
 

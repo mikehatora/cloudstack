@@ -25,6 +25,8 @@ var g_enableLogging = false;
 var g_timezoneoffset = null;
 var g_timezone = null;
 var g_supportELB = null;
+var g_KVMsnapshotenabled =  null;
+var g_regionsecondaryenabled = null;
 var g_userPublicTemplateEnabled = "true";
 var g_cloudstackversion = null;
 var g_queryAsyncJobResultInterval = 3000;
@@ -46,8 +48,6 @@ var md5HashedLogin = false;
 var pageSize = 20;
 
 var rootAccountId = 1;
-var havingSwift = false;
-var havingS3 = false;
 
 //async action
 var pollAsyncJobResult = function(args) {
@@ -699,7 +699,23 @@ var addGuestNetworkDialog = {
 }
 
 
-// Role Functions
+    function isLdapEnabled() {
+        var result;
+        $.ajax({
+            url: createURL("listLdapConfigurations"),
+            dataType: "json",
+            async: false,
+            success: function(json) {
+                result = (json.ldapconfigurationresponse.count > 0);
+            },
+            error: function(json) {
+                result = false;
+            }
+        });
+        return result;
+    }
+
+    // Role Functions
 
     function isAdmin() {
         return (g_role == 1);
@@ -1453,3 +1469,9 @@ cloudStack.api = {
         };
     }
 };
+
+function strOrFunc(arg, args) {
+    if (typeof arg === 'function')
+        return arg(args);
+    return arg;
+}

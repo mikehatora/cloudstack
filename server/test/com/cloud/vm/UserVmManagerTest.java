@@ -48,10 +48,11 @@ import org.apache.cloudstack.api.command.admin.vm.AssignVMCmd;
 import org.apache.cloudstack.api.command.user.vm.RestoreVMCmd;
 import org.apache.cloudstack.api.command.user.vm.ScaleVMCmd;
 import org.apache.cloudstack.context.CallContext;
+import org.apache.cloudstack.engine.orchestration.service.VolumeOrchestrationService;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 
 import com.cloud.capacity.CapacityManager;
 import com.cloud.configuration.ConfigurationManager;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.exception.ConcurrentOperationException;
 import com.cloud.exception.InsufficientCapacityException;
 import com.cloud.exception.InvalidParameterValueException;
@@ -62,10 +63,10 @@ import com.cloud.hypervisor.Hypervisor;
 import com.cloud.hypervisor.Hypervisor.HypervisorType;
 import com.cloud.offering.ServiceOffering;
 import com.cloud.service.ServiceOfferingVO;
+import com.cloud.service.dao.ServiceOfferingDao;
 import com.cloud.storage.Storage.ImageFormat;
 import com.cloud.storage.VMTemplateVO;
 import com.cloud.storage.Volume;
-import com.cloud.storage.VolumeManager;
 import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.VMTemplateDao;
 import com.cloud.storage.dao.VolumeDao;
@@ -73,9 +74,11 @@ import com.cloud.user.Account;
 import com.cloud.user.AccountManager;
 import com.cloud.user.AccountService;
 import com.cloud.user.AccountVO;
+import com.cloud.user.ResourceLimitService;
 import com.cloud.user.UserVO;
 import com.cloud.user.dao.AccountDao;
 import com.cloud.user.dao.UserDao;
+import com.cloud.utils.db.EntityManager;
 import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.vm.dao.UserVmDao;
 import com.cloud.vm.dao.VMInstanceDao;
@@ -84,7 +87,7 @@ public class UserVmManagerTest {
 
     @Spy UserVmManagerImpl _userVmMgr = new UserVmManagerImpl();
     @Mock VirtualMachineManager _itMgr;
-    @Mock VolumeManager _storageMgr;
+    @Mock VolumeOrchestrationService _storageMgr;
     @Mock Account _account;
     @Mock AccountManager _accountMgr;
     @Mock AccountService _accountService;
@@ -107,6 +110,11 @@ public class UserVmManagerTest {
     @Mock VolumeVO _volumeMock;
     @Mock List<VolumeVO> _rootVols;
     @Mock Account _accountMock2;
+    @Mock ServiceOfferingDao _offeringDao;
+    @Mock
+    EntityManager _entityMgr;
+    @Mock ResourceLimitService _resourceLimitMgr;
+
     @Before
     public void setup(){
         MockitoAnnotations.initMocks(this);
@@ -122,8 +130,11 @@ public class UserVmManagerTest {
         _userVmMgr._userDao = _userDao;
         _userVmMgr._accountMgr = _accountMgr;
         _userVmMgr._configMgr = _configMgr;
+        _userVmMgr._offeringDao= _offeringDao;
         _userVmMgr._capacityMgr = _capacityMgr;
+        _userVmMgr._resourceLimitMgr = _resourceLimitMgr;
         _userVmMgr._scaleRetry = 2;
+        _userVmMgr._entityMgr = _entityMgr;
 
         doReturn(3L).when(_account).getId();
         doReturn(8L).when(_vmMock).getAccountId();
@@ -355,8 +366,8 @@ public class UserVmManagerTest {
         ServiceOffering so1 =  getSvcoffering(512);
         ServiceOffering so2 =  getSvcoffering(256);
 
-        when(_configMgr.getServiceOffering(anyLong())).thenReturn(so1);
-        when(_configMgr.getServiceOffering(1L)).thenReturn(so1);
+        when(_entityMgr.findById(eq(ServiceOffering.class), anyLong())).thenReturn(so1);
+        when(_offeringDao.findByIdIncludingRemoved(anyLong())).thenReturn((ServiceOfferingVO) so1);
 
         Account account = new AccountVO("testaccount", 1L, "networkdomain", (short)0, UUID.randomUUID().toString());
         UserVO user = new UserVO(1, "testuser", "password", "firstname", "lastName", "email", "timezone", UUID.randomUUID().toString());
@@ -392,8 +403,8 @@ public class UserVmManagerTest {
         ServiceOffering so1 =  getSvcoffering(512);
         ServiceOffering so2 =  getSvcoffering(256);
 
-        when(_configMgr.getServiceOffering(anyLong())).thenReturn(so2);
-        when(_configMgr.getServiceOffering(1L)).thenReturn(so1);
+        when(_entityMgr.findById(eq(ServiceOffering.class), anyLong())).thenReturn(so2);
+        when(_entityMgr.findById(ServiceOffering.class, 1L)).thenReturn(so1);
 
         doReturn(VirtualMachine.State.Stopped).when(_vmInstance).getState();
         when(_vmDao.findById(anyLong())).thenReturn(null);
@@ -439,14 +450,14 @@ public class UserVmManagerTest {
         ServiceOffering so1 =  getSvcoffering(512);
         ServiceOffering so2 =  getSvcoffering(256);
 
-        when(_configMgr.getServiceOffering(anyLong())).thenReturn(so2);
-        when(_configMgr.getServiceOffering(1L)).thenReturn(so1);
+        when(_entityMgr.findById(eq(ServiceOffering.class), anyLong())).thenReturn(so2);
+        when(_entityMgr.findById(ServiceOffering.class, 1L)).thenReturn(so1);
 
         doReturn(VirtualMachine.State.Running).when(_vmInstance).getState();
 
         //when(ApiDBUtils.getCpuOverprovisioningFactor()).thenReturn(3f);
         when(_capacityMgr.checkIfHostHasCapacity(anyLong(), anyInt(), anyLong(), anyBoolean(), anyFloat(), anyFloat(),  anyBoolean())).thenReturn(false);
-        when(_itMgr.reConfigureVm(_vmInstance, so1, false)).thenReturn(_vmInstance);
+        when(_itMgr.reConfigureVm(_vmInstance.getUuid(), so1, false)).thenReturn(_vmInstance);
 
         doReturn(true).when(_itMgr).upgradeVmDb(anyLong(), anyLong());
 

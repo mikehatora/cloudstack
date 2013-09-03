@@ -66,7 +66,6 @@ import org.apache.cloudstack.engine.subsystem.api.storage.ImageStoreProvider;
 import org.apache.cloudstack.engine.subsystem.api.storage.PrimaryDataStoreInfo;
 import org.apache.cloudstack.engine.subsystem.api.storage.SnapshotDataFactory;
 import org.apache.cloudstack.engine.subsystem.api.storage.SnapshotInfo;
-import org.apache.cloudstack.engine.subsystem.api.storage.StoragePoolAllocator;
 import org.apache.cloudstack.engine.subsystem.api.storage.TemplateDataFactory;
 import org.apache.cloudstack.engine.subsystem.api.storage.TemplateService;
 import org.apache.cloudstack.engine.subsystem.api.storage.VolumeDataFactory;
@@ -74,12 +73,14 @@ import org.apache.cloudstack.engine.subsystem.api.storage.VolumeService;
 import org.apache.cloudstack.engine.subsystem.api.storage.VolumeService.VolumeApiResult;
 import org.apache.cloudstack.engine.subsystem.api.storage.ZoneScope;
 import org.apache.cloudstack.framework.async.AsyncCallFuture;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
 import org.apache.cloudstack.storage.datastore.db.ImageStoreDao;
 import org.apache.cloudstack.storage.datastore.db.ImageStoreDetailsDao;
 import org.apache.cloudstack.storage.datastore.db.ImageStoreVO;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.SnapshotDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.SnapshotDataStoreVO;
+import org.apache.cloudstack.storage.datastore.db.StoragePoolDetailsDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
 import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreVO;
@@ -103,14 +104,10 @@ import com.cloud.cluster.ClusterManagerListener;
 import com.cloud.cluster.ManagementServerHost;
 import com.cloud.configuration.Config;
 import com.cloud.configuration.ConfigurationManager;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.ClusterVO;
 import com.cloud.dc.DataCenterVO;
-import com.cloud.dc.Pod;
 import com.cloud.dc.dao.ClusterDao;
 import com.cloud.dc.dao.DataCenterDao;
-import com.cloud.deploy.DataCenterDeployment;
-import com.cloud.deploy.DeploymentPlanner.ExcludeList;
 import com.cloud.exception.AgentUnavailableException;
 import com.cloud.exception.ConnectionException;
 import com.cloud.exception.DiscoveryException;
@@ -153,6 +150,7 @@ import com.cloud.user.User;
 import com.cloud.user.dao.UserDao;
 import com.cloud.utils.NumbersUtil;
 import com.cloud.utils.Pair;
+import com.cloud.utils.StringUtils;
 import com.cloud.utils.UriUtils;
 import com.cloud.utils.component.ComponentContext;
 import com.cloud.utils.component.ManagerBase;
@@ -167,11 +165,8 @@ import com.cloud.utils.db.SearchCriteria;
 import com.cloud.utils.db.SearchCriteria.Op;
 import com.cloud.utils.db.Transaction;
 import com.cloud.utils.exception.CloudRuntimeException;
-import com.cloud.vm.DiskProfile;
 import com.cloud.vm.VMInstanceVO;
 import com.cloud.vm.VirtualMachine.State;
-import com.cloud.vm.VirtualMachineProfile;
-import com.cloud.vm.VirtualMachineProfileImpl;
 import com.cloud.vm.dao.VMInstanceDao;
 
 @Component
@@ -206,6 +201,8 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
     protected VMInstanceDao _vmInstanceDao;
     @Inject
     protected PrimaryDataStoreDao _storagePoolDao = null;
+    @Inject
+    protected StoragePoolDetailsDao _storagePoolDetailsDao;
     @Inject
     protected ImageStoreDao _imageStoreDao = null;
     @Inject
@@ -262,16 +259,6 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
     private TemplateService _imageSrv;
     @Inject
     EndPointSelector _epSelector;
-
-    protected List<StoragePoolAllocator> _storagePoolAllocators;
-
-    public List<StoragePoolAllocator> getStoragePoolAllocators() {
-        return _storagePoolAllocators;
-    }
-
-    public void setStoragePoolAllocators(List<StoragePoolAllocator> _storagePoolAllocators) {
-        this._storagePoolAllocators = _storagePoolAllocators;
-    }
 
     protected List<StoragePoolDiscoverer> _discoverers;
 
@@ -398,36 +385,6 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
         }
 
         return false;
-    }
-
-    @Override
-    public StoragePool findStoragePool(DiskProfile dskCh, final DataCenterVO dc, Pod pod, Long clusterId, Long hostId, VMInstanceVO vm,
-            final Set<StoragePool> avoid) {
-        Long podId = null;
-        if (pod != null) {
-            podId = pod.getId();
-        } else if (clusterId != null) {
-            ClusterVO cluster = _clusterDao.findById(clusterId);
-            if (cluster != null) {
-                podId = cluster.getPodId();
-            }
-        }
-
-        VirtualMachineProfile profile = new VirtualMachineProfileImpl(vm);
-        for (StoragePoolAllocator allocator : _storagePoolAllocators) {
-
-            ExcludeList avoidList = new ExcludeList();
-            for (StoragePool pool : avoid) {
-                avoidList.addPool(pool.getId());
-            }
-            DataCenterDeployment plan = new DataCenterDeployment(dc.getId(), podId, clusterId, hostId, null, null);
-
-            final List<StoragePool> poolList = allocator.allocateToPool(dskCh, profile, plan, avoidList, 1);
-            if (poolList != null && !poolList.isEmpty()) {
-                return (StoragePool) dataStoreMgr.getDataStore(poolList.get(0).getId(), DataStoreRole.Primary);
-            }
-        }
-        return null;
     }
 
     @Override
@@ -569,7 +526,7 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
 
     @Override
     public String getStoragePoolTags(long poolId) {
-        return _configMgr.listToCsvTags(_storagePoolDao.searchForStoragePoolDetails(poolId, "true"));
+        return StringUtils.listToCsvTags(_storagePoolDao.searchForStoragePoolDetails(poolId, "true"));
     }
 
     @Override
@@ -777,7 +734,22 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
             throw new IllegalArgumentException("Unable to find storage pool with ID: " + id);
         }
 
+        Map<String, String> updatedDetails = new HashMap<String, String>();
+
         if (tags != null) {
+            Map<String, String> existingDetails = _storagePoolDetailsDao.getDetails(id);
+            Set<String> existingKeys = existingDetails.keySet();
+
+            Map<String, String> existingDetailsToKeep = new HashMap<String, String>();
+
+            for (String existingKey : existingKeys) {
+                String existingValue = existingDetails.get(existingKey);
+
+                if (!Boolean.TRUE.toString().equalsIgnoreCase(existingValue)) {
+                    existingDetailsToKeep.put(existingKey, existingValue);
+                }
+            }
+
             Map<String, String> details = new HashMap<String, String>();
             for (String tag : tags) {
                 tag = tag.trim();
@@ -786,10 +758,58 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
                 }
             }
 
-            _storagePoolDao.updateDetails(id, details);
+            Set<String> existingKeysToKeep = existingDetailsToKeep.keySet();
+
+            for (String existingKeyToKeep : existingKeysToKeep) {
+                String existingValueToKeep = existingDetailsToKeep.get(existingKeyToKeep);
+
+                if (details.containsKey(existingKeyToKeep)) {
+                    throw new CloudRuntimeException("Storage tag '" + existingKeyToKeep + "' conflicts with a stored property of this primary storage. No changes were made.");
+                }
+
+                details.put(existingKeyToKeep, existingValueToKeep);
+            }
+
+            updatedDetails.putAll(details);
         }
 
-        return (PrimaryDataStoreInfo) dataStoreMgr.getDataStore(pool.getId(), DataStoreRole.Primary);
+        Long updatedCapacityBytes = null;
+        Long capacityBytes = cmd.getCapacityBytes();
+
+        if (capacityBytes != null) {
+            if (capacityBytes > pool.getCapacityBytes()) {
+                updatedCapacityBytes = capacityBytes;
+            }
+            else if (capacityBytes < pool.getCapacityBytes()) {
+                throw new CloudRuntimeException("The value of 'Capacity bytes' cannot be reduced in this version.");
+            }
+        }
+
+        Long updatedCapacityIops = null;
+        Long capacityIops = cmd.getCapacityIops();
+
+        if (capacityIops != null) {
+            if (capacityIops > pool.getCapacityIops()) {
+                updatedCapacityIops = capacityIops;
+            }
+            else if (capacityIops < pool.getCapacityIops()) {
+                throw new CloudRuntimeException("The value of 'Capacity IOPS' cannot be reduced in this version.");
+            }
+        }
+
+        if (updatedDetails.size() > 0) {
+            _storagePoolDao.updateDetails(id, updatedDetails);
+        }
+
+        if (updatedCapacityBytes != null) {
+            _storagePoolDao.updateCapacityBytes(id, capacityBytes);
+        }
+
+        if (updatedCapacityIops != null) {
+            _storagePoolDao.updateCapacityIops(id, capacityIops);
+        }
+
+        return (PrimaryDataStoreInfo)dataStoreMgr.getDataStore(pool.getId(), DataStoreRole.Primary);
     }
 
     @Override
@@ -1158,6 +1178,7 @@ public class StorageManagerImpl extends ManagerBase implements StorageManager, C
                             s_logger.debug("Deleting snapshot store DB entry: " + destroyedSnapshotStoreVO);
                         }
 
+                        _snapshotDao.remove(destroyedSnapshotStoreVO.getSnapshotId());
                         _snapshotStoreDao.remove(destroyedSnapshotStoreVO.getId());
                     }
 

@@ -32,11 +32,12 @@ import javax.naming.ConfigurationException;
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Component;
 
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
+
 import com.cloud.agent.AgentManager;
 import com.cloud.agent.api.ExternalNetworkResourceUsageAnswer;
 import com.cloud.agent.api.ExternalNetworkResourceUsageCommand;
 import com.cloud.configuration.Config;
-import com.cloud.configuration.dao.ConfigurationDao;
 import com.cloud.dc.DataCenterVO;
 import com.cloud.dc.dao.DataCenterDao;
 import com.cloud.dc.dao.HostPodDao;
@@ -45,6 +46,7 @@ import com.cloud.host.Host;
 import com.cloud.host.HostVO;
 import com.cloud.host.dao.HostDao;
 import com.cloud.host.dao.HostDetailsDao;
+import com.cloud.network.Networks.BroadcastDomainType;
 import com.cloud.network.dao.ExternalFirewallDeviceDao;
 import com.cloud.network.dao.ExternalFirewallDeviceVO;
 import com.cloud.network.dao.ExternalLoadBalancerDeviceDao;
@@ -553,7 +555,7 @@ public class ExternalDeviceUsageManagerImpl extends ManagerBase implements Exter
                     s_logger.debug("Not updating stats for guest network with ID " + network.getId() + " because the network is not implemented.");
                     return true;
                 } else {
-                    long vlanTag = Integer.parseInt(broadcastURI.getHost());
+                    long vlanTag = Integer.parseInt(BroadcastDomainType.getValue(broadcastURI));
                     long[] bytesSentAndReceived = answer.guestVlanBytes.get(String.valueOf(vlanTag));
 
                     if (bytesSentAndReceived == null) {

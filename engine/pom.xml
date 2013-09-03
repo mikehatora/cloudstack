@@ -32,7 +32,6 @@
   </build>
   <modules>
     <module>api</module>
-    <module>compute</module>
     <module>orchestration</module>
     <module>storage</module>
     <module>storage/volume</module>
@@ -48,11 +47,6 @@
   <profiles>
   <profile>
       <id>integration-test</id>
-      <activation>
-        <property>
-          <name>nonoss</name>
-        </property>
-      </activation>
       <modules>
         <module>storage/integration-test</module>
       </modules>

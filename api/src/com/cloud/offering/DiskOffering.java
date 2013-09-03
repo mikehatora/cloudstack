@@ -28,6 +28,12 @@ import org.apache.cloudstack.api.InternalIdentity;
  *
  */
 public interface DiskOffering extends InfrastructureEntity, Identity, InternalIdentity {
+    enum State {
+        Inactive,
+        Active,
+    }
+
+    State getState();
 
     public enum DiskCacheMode {
         NONE("none"), WRITEBACK("writeback"), WRITETHROUGH("writethrough");
@@ -79,6 +85,8 @@ public interface DiskOffering extends InfrastructureEntity, Identity, InternalId
     void setMaxIops(Long maxIops);
 
     Long getMaxIops();
+
+    boolean isRecreatable();
 
     void setBytesReadRate(Long bytesReadRate);
 

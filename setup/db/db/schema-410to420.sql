@@ -36,11 +36,15 @@ INSERT IGNORE INTO `cloud`.`hypervisor_capabilities`(uuid, hypervisor_type, hype
 INSERT IGNORE INTO `cloud`.`hypervisor_capabilities`(uuid, hypervisor_type, hypervisor_version, max_guests_limit, security_group_enabled, max_hosts_per_cluster) VALUES (UUID(), 'VMware', '5.1', 128, 0, 32);
 UPDATE `cloud`.`hypervisor_capabilities` SET `storage_motion_supported`=true WHERE `hypervisor_type`='VMware' AND `hypervisor_version`='5.1';
 UPDATE `cloud`.`hypervisor_capabilities` SET `storage_motion_supported`=true WHERE `hypervisor_type`='VMware' AND `hypervisor_version`='5.0';
+UPDATE `cloud`.`hypervisor_capabilities` SET `storage_motion_supported`=true WHERE `hypervisor_type`='XenServer' AND `hypervisor_version`='6.1.0';
+UPDATE `cloud`.`hypervisor_capabilities` SET `storage_motion_supported`=true WHERE `hypervisor_type`='XenServer' AND `hypervisor_version`='6.2.0';
 DELETE FROM `cloud`.`configuration` where name='vmware.percluster.host.max';
 DELETE FROM `cloud`.`configuration` where name='router.template.id';
 DELETE FROM `cloud`.`configuration` where name='swift.enable';
 DELETE FROM `cloud`.`configuration` where name='s3.enable';
 INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'AgentManager', 'xen.nics.max', '7', 'Maximum allowed nics for Vms created on Xen');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Network', 'DEFAULT', 'management-server', 'vmware.use.dvswitch', 'false', 'Enable/Disable Nexus/Vmware dvSwitch in VMware environment');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Network', 'DEFAULT', 'management-server', 'vmware.ports.per.dvportgroup', '256', 'Default number of ports per Vmware dvPortGroup in VMware environment');
 INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Network', 'DEFAULT', 'management-server', 'midonet.apiserver.address', 'http://localhost:8081', 'Specify the address at which the Midonet API server can be contacted (if using Midonet)');
 INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Network', 'DEFAULT', 'management-server', 'midonet.providerrouter.id', 'd7c5e6a3-e2f4-426b-b728-b7ce6a0448e5', 'Specifies the UUID of the Midonet provider router (if using Midonet)');
 ALTER TABLE `cloud`.`load_balancer_vm_map` ADD state VARCHAR(40) NULL COMMENT 'service status updated by LB healthcheck manager';
@@ -60,6 +64,10 @@ alter table storage_pool change available_bytes used_bytes bigint unsigned;
 -- alter table volume_host_ref add update_count bigint unsigned;
 -- alter table volume_host_ref add updated datetime;
 alter table template_spool_ref add updated datetime;
+UPDATE `cloud`.`template_spool_ref` set state='Ready' WHERE download_state = 'DOWNLOADED';
+UPDATE `cloud`.`template_spool_ref` set update_count=0;
+
+
 CREATE TABLE  `cloud`.`object_datastore_ref` (
   `id` bigint unsigned NOT NULL auto_increment,
   `datastore_uuid`  varchar(255) NOT NULL,
@@ -279,6 +287,7 @@ CREATE TABLE `cloud`.`load_balancer_healthcheck_policies` (
 
 INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'vm.instancename.flag', 'false', 'Append guest VM display Name (if set) to the internal name of the VM');
 
+UPDATE `cloud`.`guest_os` SET category_id=10 where id=59;
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (165, UUID(), 6, 'Windows 8 (32-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (166, UUID(), 6, 'Windows 8 (64-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (167, UUID(), 6, 'Windows Server 2012 (64-bit)');
@@ -290,6 +299,8 @@ UPDATE `cloud`.`vm_template` set guest_os_id = 166 where guest_os_id = 206;
 UPDATE `cloud`.`vm_instance` set guest_os_id = 166 where guest_os_id = 206;
 DELETE IGNORE FROM `cloud`.`guest_os` where id=206;
 
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (141, UUID(), 1, 'CentOS 5.6 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (142, UUID(), 1, 'CentOS 5.6 (64-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (169, UUID(), 10, 'Ubuntu 11.04 (32-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (170, UUID(), 10, 'Ubuntu 11.04 (64-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (171, UUID(), 1, 'CentOS 6.3 (32-bit)');
@@ -304,6 +315,44 @@ INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALU
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (180, UUID(), 1, 'CentOS 6.2 (64-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (181, UUID(), 1, 'CentOS 6.4 (32-bit)');
 INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (182, UUID(), 1, 'CentOS 6.4 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (183, UUID(), 2, 'Debian GNU/Linux 7(32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (184, UUID(), 2, 'Debian GNU/Linux 7(64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (185, UUID(), 5, 'SUSE Linux Enterprise Server 11 SP2 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (186, UUID(), 5, 'SUSE Linux Enterprise Server 11 SP2 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (187, UUID(), 5, 'SUSE Linux Enterprise Server 11 SP3 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (188, UUID(), 5, 'SUSE Linux Enterprise Server 11 SP3 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (189, UUID(), 4, 'Red Hat Enterprise Linux 5.7 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (190, UUID(), 4, 'Red Hat Enterprise Linux 5.7 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (191, UUID(), 4, 'Red Hat Enterprise Linux 5.8 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (192, UUID(), 4, 'Red Hat Enterprise Linux 5.8 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (193, UUID(), 4, 'Red Hat Enterprise Linux 5.9 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (194, UUID(), 4, 'Red Hat Enterprise Linux 5.9 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (195, UUID(), 4, 'Red Hat Enterprise Linux 6.1 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (196, UUID(), 4, 'Red Hat Enterprise Linux 6.1 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (197, UUID(), 4, 'Red Hat Enterprise Linux 6.2 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (198, UUID(), 4, 'Red Hat Enterprise Linux 6.2 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (199, UUID(), 4, 'Red Hat Enterprise Linux 6.3 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (204, UUID(), 4, 'Red Hat Enterprise Linux 6.3 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (205, UUID(), 4, 'Red Hat Enterprise Linux 6.4 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (206, UUID(), 4, 'Red Hat Enterprise Linux 6.4 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (207, UUID(), 3, 'Oracle Enterprise Linux 5.7 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (208, UUID(), 3, 'Oracle Enterprise Linux 5.7 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (209, UUID(), 3, 'Oracle Enterprise Linux 5.8 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (210, UUID(), 3, 'Oracle Enterprise Linux 5.8 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (211, UUID(), 3, 'Oracle Enterprise Linux 5.9 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (212, UUID(), 3, 'Oracle Enterprise Linux 5.9 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (213, UUID(), 3, 'Oracle Enterprise Linux 6.1 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (214, UUID(), 3, 'Oracle Enterprise Linux 6.1 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (215, UUID(), 3, 'Oracle Enterprise Linux 6.2 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (216, UUID(), 3, 'Oracle Enterprise Linux 6.2 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (217, UUID(), 3, 'Oracle Enterprise Linux 6.3 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (218, UUID(), 3, 'Oracle Enterprise Linux 6.3 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (219, UUID(), 3, 'Oracle Enterprise Linux 6.4 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (220, UUID(), 3, 'Oracle Enterprise Linux 6.4 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (221, UUID(), 7, 'Apple Mac OS X 10.6 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (222, UUID(), 7, 'Apple Mac OS X 10.6 (64-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (223, UUID(), 7, 'Apple Mac OS X 10.7 (32-bit)');
+INSERT IGNORE INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (224, UUID(), 7, 'Apple Mac OS X 10.7 (64-bit)');
 
 
 INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Windows 8 (32-bit)', 165);
@@ -314,35 +363,33 @@ INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name
 INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'Windows 8 (64-bit)', 166);
 INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'Windows Server 2012 (64-bit)', 167);
 INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'Windows Server 8 (64-bit)', 168);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.5 (32-bit)', 111);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.5 (64-bit)', 112);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.6 (32-bit)', 141);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.6 (64-bit)', 142);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.7 (32-bit)', 161);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.7 (64-bit)', 162);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.8 (32-bit)', 173);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.8 (64-bit)', 174);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.9 (32-bit)', 175);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 5.9 (64-bit)', 176);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.0 (32-bit)', 143);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.0 (64-bit)', 144);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.1 (32-bit)', 177);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.1 (64-bit)', 178);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.2 (32-bit)', 179);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.2 (64-bit)', 180);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.3 (32-bit)', 171);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.3 (64-bit)', 172);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.4 (32-bit)', 181);
-INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES  ("XenServer", 'CentOS 6.4 (64-bit)', 182);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.5 (32-bit)', 111);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.5 (64-bit)', 112);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.6 (32-bit)', 141);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.6 (64-bit)', 142);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.7 (32-bit)', 161);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.7 (64-bit)', 162);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.8 (32-bit)', 173);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.8 (64-bit)', 174);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.9 (32-bit)', 175);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 5.9 (64-bit)', 176);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.0 (32-bit)', 143);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.0 (64-bit)', 144);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.1 (32-bit)', 177);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.1 (64-bit)', 178);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.2 (32-bit)', 179);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.2 (64-bit)', 180);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.3 (32-bit)', 171);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.3 (64-bit)', 172);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.4 (32-bit)', 181);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'CentOS 6.4 (64-bit)', 182);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'Debian GNU/Linux 7(32-bit)', 183);
+INSERT IGNORE INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("XenServer", 'Debian GNU/Linux 7(64-bit)', 184);
 
-INSERT INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (211, UUID(), 7, 'Apple Mac OS X 10.6 (32-bit)');
-INSERT INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (212, UUID(), 7, 'Apple Mac OS X 10.6 (64-bit)');
-INSERT INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (213, UUID(), 7, 'Apple Mac OS X 10.7 (32-bit)');
-INSERT INTO `cloud`.`guest_os` (id, uuid, category_id, display_name) VALUES (214, UUID(), 7, 'Apple Mac OS X 10.7 (64-bit)');
-INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.6 (32-bit)', 211);
-INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.6 (64-bit)', 212);
-INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.7 (32-bit)', 213);
-INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.7 (64-bit)', 214);
+INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.6 (32-bit)', 221);
+INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.6 (64-bit)', 222);
+INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.7 (32-bit)', 223);
+INSERT INTO `cloud`.`guest_os_hypervisor` (hypervisor_type, guest_os_name, guest_os_id) VALUES ("VmWare", 'Apple Mac OS X 10.7 (64-bit)', 224);
 
 CREATE TABLE `cloud`.`user_vm_clone_setting` (
   `vm_id` bigint unsigned NOT NULL COMMENT 'guest VM id',
@@ -350,8 +397,10 @@ CREATE TABLE `cloud`.`user_vm_clone_setting` (
   PRIMARY KEY (`vm_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-
-INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'UserVmManager', 'vmware.create.full.clone' , 'false', 'If set to true, creates VMs as full clones on ESX hypervisor');
+INSERT INTO `cloud`.`configuration` (category, instance, component, name, value, description)
+    SELECT tmp.category, tmp.instance, tmp.component, tmp.name, tmp.value, tmp.description FROM
+    (SELECT 'Advanced' category, 'DEFAULT' instance, 'UserVmManager' component, 'vmware.create.full.clone' name, 'true' value, 'If set to true, creates VMs as full clones on ESX hypervisor' description) tmp
+    WHERE NOT EXISTS (SELECT 1 FROM `cloud`.`configuration` WHERE name = 'vmware.create.full.clone');
 
 CREATE TABLE `cloud`.`affinity_group` (
   `id` bigint unsigned NOT NULL auto_increment,
@@ -419,6 +468,8 @@ CREATE TABLE nic_secondary_ips (
 
 ALTER TABLE `cloud`.`nics` ADD COLUMN secondary_ip SMALLINT DEFAULT '0' COMMENT 'secondary ips configured for the nic';
 ALTER TABLE `cloud`.`user_ip_address` ADD COLUMN dnat_vmip VARCHAR(40);
+UPDATE `cloud`.`user_ip_address`,`cloud`.`nics` SET `user_ip_address`.`dnat_vmip` = `nics`.`ip4_address`
+      WHERE `user_ip_address`.`vm_id` = `nics`.`instance_id` AND `user_ip_address`.`network_id` = `nics`.`network_id` AND `user_ip_address`.`one_to_one_nat` = 1;
 
 ALTER TABLE `cloud`.`alert` ADD COLUMN `archived` tinyint(1) unsigned NOT NULL DEFAULT 0;
 ALTER TABLE `cloud`.`event` ADD COLUMN `archived` tinyint(1) unsigned NOT NULL DEFAULT 0;
@@ -468,6 +519,8 @@ CREATE VIEW `cloud`.`event_view` AS
             left join
         `cloud`.`event` eve ON event.start_id = eve.id;
 
+ALTER TABLE `cloud`.`region` ADD COLUMN `portableip_service_enabled` tinyint(1) unsigned NOT NULL DEFAULT 0 COMMENT 'Is Portable IP service enalbed in the Region';
+
 ALTER TABLE `cloud`.`region` ADD COLUMN `gslb_service_enabled` tinyint(1) unsigned NOT NULL DEFAULT 1 COMMENT 'Is GSLB service enalbed in the Region';
 
 ALTER TABLE `cloud`.`external_load_balancer_devices` ADD COLUMN `is_gslb_provider` int(1) unsigned NOT NULL DEFAULT 0 COMMENT '1 if load balancer appliance is acting as gslb service provider in the zone';
@@ -483,6 +536,10 @@ ALTER TABLE `cloud`.`user_vm_details` ADD COLUMN `display_detail` tinyint(1) NOT
 ALTER TABLE `cloud`.`volumes` ADD COLUMN `display_volume` tinyint(1) NOT NULL DEFAULT 1 COMMENT 'Should volume be displayed to the end user';
 
 ALTER TABLE `cloud`.`volumes` ADD COLUMN `format` varchar(255) COMMENT 'volume format';
+update  `cloud`.`volumes` v,  `cloud`.`storage_pool` s,  `cloud`.`cluster` c  set v.format='VHD' where v.pool_id=s.id and s.cluster_id=c.id and c.hypervisor_type='XenServer';
+update  `cloud`.`volumes` v,  `cloud`.`storage_pool` s,  `cloud`.`cluster` c  set v.format='OVA' where v.pool_id=s.id and s.cluster_id=c.id and c.hypervisor_type='VMware';
+update  `cloud`.`volumes` v,  `cloud`.`storage_pool` s,  `cloud`.`cluster` c  set v.format='QCOW2' where v.pool_id=s.id and s.cluster_id=c.id and c.hypervisor_type='KVM';
+update  `cloud`.`volumes` v,  `cloud`.`storage_pool` s,  `cloud`.`cluster` c  set v.format='RAW' where v.pool_id=s.id and s.cluster_id=c.id and c.hypervisor_type='Ovm';
 
 ALTER TABLE `cloud`.`networks` ADD COLUMN `display_network` tinyint(1) NOT NULL DEFAULT 1 COMMENT 'Should network be displayed to the end user';
 
@@ -921,7 +978,7 @@ CREATE VIEW `cloud`.`host_view` AS
             left join
         `cloud`.`host_pod_ref` ON host.pod_id = host_pod_ref.id
             left join
-        `cloud`.`host_details` ON host.id = host_details.id
+        `cloud`.`host_details` ON host.id = host_details.host_id
             and host_details.name = 'guest.os.category.id'
             left join
         `cloud`.`guest_os_category` ON guest_os_category.id = CONVERT( host_details.value , UNSIGNED)
@@ -2229,4 +2286,44 @@ CREATE TABLE `cloud_usage`.`usage_vmsnapshot` (
 ) ENGINE=InnoDB CHARSET=utf8;
 
 INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'healthcheck.update.interval', '600', 'Time Interval to fetch the LB health check states (in sec)');
-INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Snapshots', 'DEFAULT', 'SnapshotManager', 'KVM.snapshot.enabled', 'false', 'whether snapshot is enabled for KVM hosts');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Snapshots', 'DEFAULT', 'SnapshotManager', 'kvm.snapshot.enabled', 'false', 'whether snapshot is enabled for KVM hosts');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'eip.use.multiple.netscalers', 'false', 'Should be set to true, if there will be multiple NetScaler devices providing EIP service in a zone');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Snapshots', 'DEFAULT', 'SnapshotManager', 'snapshot.backup.rightafter', 'true', 'backup snapshot right after snapshot is taken');
+
+DELETE FROM `cloud`.`configuration` where name='vmware.guest.vswitch';
+DELETE FROM `cloud`.`configuration` where name='vmware.private.vswitch';
+DELETE FROM `cloud`.`configuration` where name='vmware.public.vswitch';
+
+
+UPDATE `cloud`.`autoscale_vmgroups` set uuid=id WHERE uuid is NULL;
+UPDATE `cloud`.`autoscale_vmprofiles` set uuid=id WHERE uuid is NULL;
+UPDATE `cloud`.`autoscale_policies` set uuid=id WHERE uuid is NULL;
+UPDATE `cloud`.`counter` set uuid=id WHERE uuid is NULL;
+UPDATE `cloud`.`conditions` set uuid=id WHERE uuid is NULL;
+update `cloud`.`configuration` set component = 'SnapshotManager' where category = 'Snapshots' and component = 'none';
+
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Storage', 'DEFAULT', 'management-server', 'storage.cache.replacement.lru.interval', '30', 'time interval for unused data on cache storage (in days).');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Storage', 'DEFAULT', 'management-server', 'storage.cache.replacement.enabled', 'true', 'enable or disable cache storage replacement algorithm.');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Storage', 'DEFAULT', 'management-server', 'storage.cache.replacement.interval', '86400', 'time interval between cache replacement threads (in seconds).');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ("Advanced", 'DEFAULT', 'management-server', 'vmware.nested.virtualization', 'false', 'When set to true this will enable nested virtualization when this is supported by the hypervisor');
+
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.bind.principal', NULL, 'Specifies the bind principal to use for bind to LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.bind.password', NULL, 'Specifies the password to use for binding to LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.username.attribute', 'uid', 'Sets the username attribute used within LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.email.attribute', 'mail', 'Sets the email attribute used within LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.firstname.attribute', 'givenname', 'Sets the firstname attribute used within LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.lastname.attribute', 'sn', 'Sets the lastname attribute used within LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.user.object', 'inetOrgPerson', 'Sets the object type of users within LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.basedn', NULL, 'Sets the basedn for LDAP');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.search.group.principle', NULL, 'Sets the principle of the group that users must be a member of');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.truststore', NULL, 'Sets the path to the truststore to use for LDAP SSL');
+INSERT IGNORE INTO `cloud`.`configuration` VALUES ('Advanced', 'DEFAULT', 'management-server', 'ldap.truststore.password', NULL, 'Sets the password for the truststore');
+
+
+CREATE TABLE `cloud`.`ldap_configuration` (
+  `id` bigint unsigned NOT NULL auto_increment COMMENT 'id',
+  `hostname` varchar(255) NOT NULL COMMENT 'the hostname of the ldap server',
+  `port` int(10) COMMENT 'port that the ldap server is listening on',
+  PRIMARY KEY  (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+

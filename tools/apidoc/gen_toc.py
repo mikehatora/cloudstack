@@ -118,7 +118,7 @@ known_categories = {
     'TrafficType': 'Usage',
     'Product': 'Product',
     'LB': 'Load Balancer',
-    'ldap': 'LDAP',
+    'Ldap': 'LDAP',
     'Swift': 'Swift',
     'S3' : 'S3',
     'SecondaryStorage': 'Host',
@@ -155,7 +155,9 @@ known_categories = {
     'releaseDedicatedHost': 'Dedicate Resources',
     'Baremetal' : 'Baremetal',
     'UCS' : 'UCS',
-    'Ucs' : 'UCS'
+    'Ucs' : 'UCS',
+    'CacheStores' : 'Cache Stores',
+    'CacheStore' : 'Cache Store'
     }
 
 
