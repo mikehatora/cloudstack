@@ -1,6 +1,7 @@
 {
   "files": [
-    "docs/en-US/Installation_Guide.xml"
+    "README.md",
+    "README.tools.md"
   ],
   "formats": {
     "pdf": {
