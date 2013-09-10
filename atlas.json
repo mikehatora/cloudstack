@@ -1,0 +1,14 @@
+{
+  "files": [
+    "docs/en-US/Installation_Guide.xml"
+  ],
+  "formats": {
+    "pdf": {
+      "version": "print"
+    },
+    "epub": {},
+    "mobi": {},
+    "html": {}
+  },
+  "theme": "oreillymedia/atlas_tech1c_theme"
+}
